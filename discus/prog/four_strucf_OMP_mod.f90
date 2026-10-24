@@ -288,8 +288,9 @@ INTEGER (KIND=PREC_INT_LARGE)   :: h, i, j, k, iarg, iarg0
 INTEGER (KIND=PREC_INT_LARGE), PARAMETER :: shift = -6
 INTEGER (KIND=PREC_INT_LARGE)   :: num23,num123, num123_1
 !
-!  
-!COMPLEX(KIND=PREC_DP), DIMENSION(  :,:), ALLOCATABLE, SAVE :: tcsfp     ! Partial structure factor from parallel OMP
+!  Per-plane scratch array, as in four_strucf_omp: accumulating directly into
+!  tcsf(j,i,h) strides by num(1)*num(2) in the innermost loop.
+COMPLEX(KIND=PREC_DP), DIMENSION(  :,:), ALLOCATABLE :: tcsfp     ! Partial structure factor, one plane
 !
 !------ zero fourier array                                              
 !
@@ -319,20 +320,28 @@ ENDDO
 !                                                           
 !------ Loop over all atoms in 'xat'                                    
 !                                                                       
+ALLOCATE(tcsfp(1:fnum(2), 1:fnum(3)))
 DO j = 1,fnum (1)! - 1
-   loop_k: DO k = 1, nxat 
+   tcsfp = CMPLX(0.0d0, 0.0d0, KIND=KIND(0.0D0))
+   loop_k: DO k = 1, nxat
       iarg0 =  lmn(1)*iincu(k) + lmn(2)*iincv(k) + lmn(3)*iincw(k) + &
                lmn(4)*jincu(k) + lmn(5)*jincv(k) + lmn(6)*jincw(k) + &
                (j-1)*iincu(k)
       DO i = 1,fnum (2)!- 1
-         iarg = iarg0 +              iincv(k)*(i-1) 
-         DO h = 1, num (3) 
-            tcsf (j, i,h)= tcsf (j, i,h) + cex (IAND  (ISHFT(iarg, shift), MASK) )
+         iarg = iarg0 +              iincv(k)*(i-1)
+         DO h = 1, fnum (3)
+            tcsfp(i,h) = tcsfp(i,h) + cex (IAND  (ISHFT(iarg, shift), MASK) )
             iarg     = iarg + iincw(k)
-         ENDDO 
-      ENDDO 
+         ENDDO
+      ENDDO
    ENDDO  loop_k
-ENDDO 
+   DO h = 1, fnum(3)
+      DO i = 1, fnum(2)
+         tcsf(j,i,h) = tcsfp(i,h)
+      ENDDO
+   ENDDO
+ENDDO
+DEALLOCATE(tcsfp)
 !
 !------ Now we multiply with formfactor                                 
 !                                                                       
