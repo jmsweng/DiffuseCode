@@ -2767,30 +2767,59 @@ real(kind=PREC_DP)               :: arg   ! Dummy argument
 !
 integer                                        , save :: old_nanis     ! Local backup of cr_nanis
 real(kind=PREC_DP), dimension(:,:), allocatable, save :: old_anis_full ! Local backup of cr_anis_full
-!
-if(four_log) then 
-   write(output_io, '(a)') ' Computing Debye-Waller lookup table ...' 
-endif 
+!  The table depends on the grid (eck, vi), the lattice (cr_ar) and ldbw as well.
+!  Previous values are kept so that an unchanged setup does not recompute the table.
+logical                                        , save :: old_ldbw  = .false.
+real(kind=PREC_DP), dimension(3)               , save :: old_eck   = 0.0D0
+real(kind=PREC_DP), dimension(3,3)             , save :: old_vi    = 0.0D0
+real(kind=PREC_DP), dimension(3)               , save :: old_ar    = 0.0D0
 !
 lredo  = .false.
 if(allocated(four_dbw)) then
-   if(cr_nanis /= old_nanis .or. cr_nanis /= ubound(four_dbw,4).or. &
-      ubound(four_dbw,1)/=num(1) .or. ubound(four_dbw,2)/=num(1) .or. &
-      ubound(four_dbw,3)/=num(3)                   ) then 
-      lredo = .true.
-   endif
-   if(lredo) then
+   if(cr_nanis /= ubound(four_dbw,4) .or.                                    &
+      ubound(four_dbw,1)/=num(1) .or. ubound(four_dbw,2)/=num(2) .or. &
+      ubound(four_dbw,3)/=num(3)                   ) then
       deallocate(four_dbw)
       allocate(four_dbw(num(1),num(2),num(3), cr_nanis))
-   else
-      if(any(abs(cr_anis_full(:,1:cr_nanis))>TOL)) then
-         lredo = .true.
-      endif
+      lredo = .true.
    endif
 else
    allocate(four_dbw(num(1),num(2),num(3), cr_nanis))
    lredo = .true.
 endif
+!
+if(.not. lredo) then                    ! Same size, check whether anything else changed
+   lredo = .not. four_dbw_valid .or. (ldbw .neqv. old_ldbw) .or. cr_nanis /= old_nanis
+   if(.not. lredo) lredo = any(abs(eck(:,1) - old_eck) > TOL*1.0D-3) .or.     &
+                           any(abs(vi       - old_vi ) > TOL*1.0D-3) .or.     &
+                           any(abs(cr_ar    - old_ar ) > TOL*1.0D-3)
+   if(.not. lredo) then
+      if(.not. allocated(old_anis_full)) then
+         lredo = .true.
+      elseif(ubound(old_anis_full,2) /= cr_nanis) then
+         lredo = .true.
+      else
+         lredo = any(abs(cr_anis_full(:,1:cr_nanis) - old_anis_full) > TOL*1.0D-3)
+      endif
+   endif
+endif
+!
+if(.not. lredo) return                  ! Table is still valid
+!
+if(four_log) then
+   write(output_io, '(a)') ' Computing Debye-Waller lookup table ...'
+endif
+!
+four_dbw_valid = .true.
+old_ldbw  = ldbw
+old_nanis = cr_nanis
+old_eck   = eck(:,1)
+old_vi    = vi
+old_ar    = cr_ar
+if(allocated(old_anis_full)) deallocate(old_anis_full)
+allocate(old_anis_full(6,cr_nanis))
+old_anis_full = cr_anis_full(:,1:cr_nanis)
+!
 if(.not.ldbw) then
    four_dbw = 1.0D0
    return
@@ -2846,10 +2875,6 @@ enddo
 !write(*,*) ' IANIS ', ianis, four_dbw(i,j,k,ianis), four_dbw( 1,31,31,ianis)
 !write(*,*) ' IANIS ', ianis, four_dbw(i,j,k,ianis), four_dbw(31,31,31,ianis)
 enddo
-  old_nanis = cr_nanis
-  if(allocated(old_anis_full)) deallocate(old_anis_full)
-  allocate(old_anis_full(6,cr_nanis))
-  old_anis_full = cr_anis_full(:,1:cr_nanis)
 endif
 !
 end subroutine four_dbwtab
