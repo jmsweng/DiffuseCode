@@ -246,4 +246,92 @@ end subroutine four_strucf_3d
 !
 !******************************************************************************
 !
+subroutine four_strucf_nufft(nat, pos, occ, eck1, vi, inc, tol, tcsf, ier)
+!-
+!  Structure factor of nat atoms on an arbitrary regular grid
+!     h(t1,t2,t3) = eck1 + (t1-1)*vi(:,1) + (t2-1)*vi(:,2) + (t3-1)*vi(:,3)
+!  via a type-1 NUFFT of dimension = number of axes with inc>1.
+!
+!  With hc = eck1 + sum_a floor(inc(a)/2)*vi(:,a) (the grid point FINUFFT
+!  maps to mode 0) the phase splits into
+!     2 pi h.x = 2 pi hc.x + sum_a k_a * (2 pi vi(:,a).x)
+!  so the NUFFT coordinates are 2 pi vi(:,a).x wrapped into [-pi,pi] and the
+!  strengths are occ*exp(2 pi i hc.x). No condition on step size, crystal
+!  size or grid centre, increment vectors need not be parallel to a*,b*,c*.
+!+
+use precision_mod
+use wink_mod
+!
+implicit none
+!
+integer                                  , intent(in)  :: nat      ! Number of atoms
+real(kind=PREC_DP), dimension(3, nat)    , intent(in)  :: pos      ! Fractional coordinates
+real(kind=PREC_DP)                       , intent(in)  :: occ      ! Occupancy
+real(kind=PREC_DP), dimension(3)         , intent(in)  :: eck1     ! Lower left bottom corner
+real(kind=PREC_DP), dimension(3,3)       , intent(in)  :: vi       ! Increment vectors (columns)
+integer           , dimension(3)         , intent(in)  :: inc      ! Grid points along abs, ord, top
+real(kind=PREC_DP)                       , intent(in)  :: tol      ! FINUFFT tolerance
+complex(kind=PREC_DP), dimension(inc(1)*inc(2)*inc(3)), intent(out) :: tcsf  ! abscissa fastest
+integer                                  , intent(out) :: ier      ! FINUFFT error flag
+!
+integer                     :: iflag      ! Sign of i in FINUFFT
+integer                     :: nd         ! Number of non-flat axes
+integer, dimension(3)       :: axes       ! The non-flat axes
+integer(kind=PREC_INT_LONG) :: m          ! Number of atoms
+integer(kind=PREC_INT_LONG), dimension(3) :: nm   ! Modes along non-flat axes
+real(kind=PREC_DP), dimension(3)          :: hc   ! Grid point at FINUFFT mode 0
+real(kind=PREC_DP), dimension(:,:), allocatable :: xc  ! NUFFT coordinates
+complex(kind=PREC_DP), dimension(:), allocatable :: cj ! Strengths
+integer :: a, d, k
+real(kind=PREC_DP) :: arg
+type(finufft_opts) :: opts
+!
+ier   = 0
+iflag = 1
+nd    = 0
+axes  = 0
+nm    = 1
+hc    = eck1
+do a = 1, 3
+   hc = hc + real(inc(a)/2, kind=PREC_DP)*vi(:,a)
+   if(inc(a) > 1) then
+      nd       = nd + 1
+      axes(nd) = a
+      nm(nd)   = inc(a)
+   endif
+enddo
+!
+allocate(cj(nat))
+allocate(xc(nat, max(nd,1)))
+do k = 1, nat
+   arg   = zpi*dot_product(hc, pos(:,k))
+   arg   = arg - zpi*anint(arg/zpi)
+   cj(k) = occ*cmplx(cos(arg), sin(arg), kind=PREC_DP)
+   do d = 1, nd
+      arg     = zpi*dot_product(vi(:,axes(d)), pos(:,k))
+      xc(k,d) = arg - zpi*anint(arg/zpi)            ! exp(i k x), k integer: 2 pi periodic
+   enddo
+enddo
+!
+m = nat
+call finufft_default_opts(opts)
+select case(nd)
+case(0)
+   tcsf(1) = sum(cj)
+case(1)
+   call finufft1d1(m, xc(:,1),                   cj, iflag, tol, nm(1),               tcsf, opts, ier)
+case(2)
+   call finufft2d1(m, xc(:,1), xc(:,2),          cj, iflag, tol, nm(1), nm(2),        tcsf, opts, ier)
+case(3)
+   call finufft3d1(m, xc(:,1), xc(:,2), xc(:,3), cj, iflag, tol, nm(1), nm(2), nm(3), tcsf, opts, ier)
+end select
+!  FINUFFT returns modes with the first axis fastest; axes of length 1 do not
+!  change the linear order, so tcsf already has the layout of tcsf(inc(1),inc(2),inc(3)).
+!
+deallocate(cj, xc)
+!
+end subroutine four_strucf_nufft
+!
+!******************************************************************************
+!
 end module four_finufft
