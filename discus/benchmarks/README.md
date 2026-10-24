@@ -11,7 +11,32 @@ None of these files are part of the DISCUS build.
 | `test_gemm.f90` | Validates `discus/prog/four_strucf_gemm_mod.f90` against the repo kernel and an exact sum on a skewed grid with non-zero `lmn` / `off_shift` |
 | `bench_pdf.c` | 3D FFT as done now (complex-to-complex, 1 thread, `FFTW_ESTIMATE`) vs real-to-complex and threaded FFTW |
 
-## Build and run
+## Using the GEMM kernel in DISCUS
+
+Configure with BLAS enabled (OpenBLAS or MKL; found via CMake's FindBLAS):
+
+```sh
+cmake -S DiffuseCode -B build -DDISCUS_BLAS=ON
+cmake --build build -j
+```
+
+`four_strucf` then uses `four_strucf_gemm` for every grid with more than one
+point along both abscissa and ordinate (layers and volumes); lines keep the
+original kernel. To compare against the original lookup-table kernel in the
+same binary:
+
+```sh
+DISCUS_FOURIER_KERNEL=table discus_suite -macro my.mac
+```
+
+BLAS threads follow the BLAS library's own setting (e.g. `OPENBLAS_NUM_THREADS`).
+
+Check inside DISCUS (16,384 atoms, Cu/Au random alloy, X-ray, `lots off`,
+2 threads): 61³ grid 1.63 s → 0.68 s, 101³ grid 7.17 s → 2.34 s (elapsed time
+reported by `fourier run`, includes form factors and averaging). Intensities
+agree to the 5 significant digits of the `gnu` output format.
+
+## Standalone benchmarks: build and run
 
 ```sh
 # needs gfortran, OpenBLAS, FFTW3 (with the OpenMP threads library)

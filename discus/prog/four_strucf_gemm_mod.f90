@@ -12,10 +12,11 @@ module four_strucf_gemm_mod
 !  start phase p0 is built from lmn/off_shift exactly as iarg0 is in DISCUS.
 !  Threading comes from the BLAS library (OpenBLAS/MKL/BLIS).
 !
-!  Call it where four_strucf_omp now does its two loops, i.e.
-!     call four_strucf_gemm(nxat, xat, uin, vin, win, off_shift, lmn, fnum, num, tcsf)
-!     call tcsf_form_generic(lnufft, ldiscamb, lform, is_anis, iscat, isym, ientry, fnum, tcsf)
-!  Needs a BLAS at link time (-lopenblas, or MKL).
+!  Used by four_strucf (four_strucf_OMP_mod.f90) when DISCUS is configured
+!  with -DDISCUS_BLAS=ON and the grid has more than one point along both
+!  abscissa and ordinate. Set the environment variable
+!  DISCUS_FOURIER_KERNEL=table to fall back to the lookup-table kernel.
+!  BLAS threads are controlled by the BLAS library (e.g. OPENBLAS_NUM_THREADS).
 !-
 implicit none
 private
@@ -43,7 +44,7 @@ real(dp) :: xu, xv, p0, x(3), o(3)
 integer  :: kb, nb, kk, k, j, i, h, n1, n2, n3
 !
 n1 = fnum(1); n2 = fnum(2); n3 = fnum(3)
-tcsf(1:n1,1:n2,1:n3) = (0.0_dp,0.0_dp)
+tcsf = (0.0_dp,0.0_dp)     ! whole array: four_run adds tcsf(1:num) to csf, Friedel half stays zero
 if(nxat < 1) return
 allocate(U(NBLOCK,n1), V(NBLOCK,n2), A(NBLOCK,n1), w(NBLOCK), xw(NBLOCK))
 !

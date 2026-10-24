@@ -106,6 +106,12 @@ else (NEXUS_FOUND)
 
 endif (NEXUS_FOUND)
 
+# BLAS based Fourier kernel ?
+
+if (DISCUS_BLAS)
+  set (SOURCES_ALL ${SOURCES_ALL} four_strucf_gemm_mod.f90)
+endif (DISCUS_BLAS)
+
 # OpenMP ?
 
 if (CUDA_FOUND)
