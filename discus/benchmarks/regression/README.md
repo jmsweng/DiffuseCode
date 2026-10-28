@@ -37,7 +37,7 @@ The cases cover:
 ### The `kernel` check and the original table kernel
 
 The original turbo kernel looks up sin/cos in a 2^16-entry table. Compared with
-GEMM and NUFFT (which agree to ~1e-7), its error reaches:
+GEMM and NUFFT (which agree to 1e-8 .. 3e-6), its error reaches:
 - 1e-3 of the maximum in layers;
 - 2e-3 with `set aver`;
 - up to ~1% at single weak diffuse points (3D-ΔPDF: 3e-4 of the maximum).
