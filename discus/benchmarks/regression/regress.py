@@ -22,11 +22,12 @@ Check kinds
     kernel  test default kernel vs ref                         rel. max diff <= 1e-2
             Gross-error guard only. With -DDISCUS_BLAS=ON the test binary uses the
             GEMM kernel (exact phases); ref uses the 2^16-entry sin/cos table, whose
-            error reaches ~1e-3 of the maximum (with 'set aver') and ~1% at single
+            error reaches ~2.5e-3 of the maximum (with 'set aver') and ~1% at single
             weak diffuse points. Accuracy is judged by the oracle checks instead.
     oracle  test NUFFT vs test turbo (same binary)             rel. max diff <= 1e-5
             Two independent exact-phase methods (GEMM or table turbo vs FINUFFT,
-            tol 1e-7); with the table kernel compiled in, expect ~1e-4 here.
+            tol 1e-7). Without -DDISCUS_BLAS=ON the turbo side is the table kernel and the
+            tolerance becomes 5e-3 (also for lines, which never use GEMM).
     mask    NUFFT with 'set aver' vs plain NUFFT               must be 0 at integer
             hkl and identical elsewhere
     info    reported only (e.g. known-wrong behaviour of the old NUFFT)
@@ -257,6 +258,7 @@ def build_cases():
     return C
 
 
+TABLE_TOL = 5e-3   # comparisons against the 2^16 sin/cos table kernel
 TOL = {'exact': 1e-12, 'kernel': 1e-2, 'oracle': 1e-5, 'mask': 1e-12, 'info': None}
 
 ERR_RE = re.compile(r'\*\*\*[A-Z]{3,4} ?\*\*\*')
@@ -354,6 +356,8 @@ def main():
 
     cases = build_cases()
     selected = [n for n in cases if fnmatch.fnmatch(n, a.only)]
+    if 't_odd3d' not in selected:
+        selected.insert(0, 't_odd3d')   # needed to detect whether the test binary has GEMM
     if any(n == 'dbw_session' for n in selected):
         selected += [n for n in cases if n.startswith('dbw_fresh_') and n not in selected]
     failed = 0
@@ -383,13 +387,14 @@ def main():
                 failed += 1
 
     # Without -DDISCUS_BLAS=ON the test binary's turbo IS the table kernel: then the
-    # NUFFT oracle can only be as good as the table (~1e-4 .. 1e-3 of the maximum).
+    # NUFFT oracle can only be as good as the table. Measured table error: up to 1.5e-3 of
+    # the maximum in layers and 2.4e-3 with 'set aver' (two machines); tolerance 5e-3.
     fa, fb = os.path.join(work, 'test', 't_odd3d.h5'), os.path.join(work, 'test_table', 't_odd3d.h5')
     if os.path.exists(fa) and os.path.exists(fb):
         if np.array_equal(load(fa), load(fb)):
-            TOL['oracle'] = 1e-3
+            TOL['oracle'] = TABLE_TOL
             print('NOTE: test binary has no GEMM kernel (built without -DDISCUS_BLAS=ON); '
-                  'oracle tolerance relaxed to 1e-3, kernel checks are identical to exact checks.')
+                  'oracle tolerance relaxed to %.0e, kernel checks are identical to exact checks.' % TABLE_TOL)
         else:
             print('NOTE: test binary uses the GEMM kernel (-DDISCUS_BLAS=ON).')
 
@@ -413,7 +418,7 @@ def main():
                 continue
             tol = TOL[kind]
             if kind == 'oracle' and cases[name].get('table_turbo'):
-                tol = max(tol, 1e-3)      # turbo side is always the table kernel here
+                tol = max(tol, TABLE_TOL)  # turbo side is always the table kernel here
             ok = tol is None or r['rel'] <= tol
             res = 'info' if tol is None else ('ok' if ok else 'FAIL (tol %.0e)' % tol)
             failed += 0 if ok else 1
