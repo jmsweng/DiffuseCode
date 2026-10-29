@@ -1,3 +1,10 @@
+> **This fork (`jmsweng/DiffuseCode`, branch `perf/gemm-fourier`)** adds faster
+> 3D diffuse scattering and 3D-ΔPDF calculations in DISCUS (up to ~15× on one
+> thread) and fixes a NUFFT bug that gave wrong intensities on many grids.
+> See **[discus/benchmarks/CHANGES.md](discus/benchmarks/CHANGES.md)** for the
+> changes, validation and timing benchmarks. The original project is
+> [tproffen/DiffuseCode](https://github.com/tproffen/DiffuseCode).
+
 Diffuse program collection
 ================================================================
 
