@@ -29,12 +29,26 @@ same binary:
 DISCUS_FOURIER_KERNEL=table discus_suite -macro my.mac
 ```
 
-BLAS threads follow the BLAS library's own setting (e.g. `OPENBLAS_NUM_THREADS`).
+Threads: for volumes the layers are distributed over the OpenMP threads
+(`OMP_NUM_THREADS`) and the BLAS library is switched to one thread meanwhile
+(OpenBLAS and MKL on Linux, see `four_blas_threads.c`; elsewhere set
+`OPENBLAS_NUM_THREADS=1` / `MKL_NUM_THREADS=1` / `VECLIB_MAXIMUM_THREADS=1`).
+A single layer is one GEMM and uses the BLAS library's own threads.
 
-Check inside DISCUS (16,384 atoms, Cu/Au random alloy, X-ray, `lots off`,
-2 threads): 61³ grid 1.63 s → 0.68 s, 101³ grid 7.17 s → 2.34 s (elapsed time
-reported by `fourier run`, includes form factors and averaging). Intensities
-agree to the 5 significant digits of the `gnu` output format.
+**Timing note.** The `Elapsed time` DISCUS prints after `fourier run` is
+`CPU_TIME`, i.e. CPU time summed over all threads, not wall-clock time. It does
+not go down with more threads, and spinning BLAS/OpenMP threads inflate it.
+Always measure wall-clock time (e.g. `/usr/bin/time`, or `date` around the run).
+
+Wall-clock check inside DISCUS (16,384 atoms, Cu/Au random alloy, X-ray,
+`lots off`, 101³ grid -5..5, median of 3 runs, 2-core VM, includes ~0.7 s
+start-up and structure reading):
+
+| Build | 1 thread | 2 threads |
+|---|---|---|
+| master | 24.7 s | 4.4 s |
+| branch, default (table kernel) | 8.1 s | 4.4 s |
+| branch, `-DDISCUS_BLAS=ON` | 2.7 s | 1.6 s |
 
 ## Standalone benchmarks: build and run
 
@@ -43,7 +57,8 @@ agree to the 5 significant digits of the `gnu` output format.
 gfortran -O3 -ffast-math -fopenmp bench_strucf.f90 -lopenblas -o bench_strucf
 OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 ./bench_strucf 25 101   # cells per edge, grid points per axis
 
-gfortran -O3 -ffast-math -fopenmp ../prog/four_strucf_gemm_mod.f90 test_gemm.f90 -lopenblas -o test_gemm
+gcc -O2 -c ../prog/four_blas_threads.c
+gfortran -O3 -ffast-math -fopenmp ../prog/four_strucf_gemm_mod.f90 test_gemm.f90 four_blas_threads.o -lopenblas -o test_gemm
 ./test_gemm
 
 gcc -O2 bench_pdf.c -lfftw3_omp -lfftw3 -fopenmp -lm -o bench_pdf

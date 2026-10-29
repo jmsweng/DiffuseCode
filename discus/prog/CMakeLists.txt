@@ -109,7 +109,7 @@ endif (NEXUS_FOUND)
 # BLAS based Fourier kernel ?
 
 if (DISCUS_BLAS)
-  set (SOURCES_ALL ${SOURCES_ALL} four_strucf_gemm_mod.f90)
+  set (SOURCES_ALL ${SOURCES_ALL} four_strucf_gemm_mod.f90 four_blas_threads.c)
 endif (DISCUS_BLAS)
 
 # OpenMP ?

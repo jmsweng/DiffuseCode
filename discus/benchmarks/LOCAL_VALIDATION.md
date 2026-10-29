@@ -173,9 +173,14 @@ rerun with `build-branch` and with `technique:turbo` and report both.
 
 ## 7. Performance on this machine
 
-Use one or two of the owner's real jobs (large crystal, 3D grid). Time the
-Fourier step (DISCUS prints `Elapsed time` after `run` in the fourier menu) and
-the 3D-PDF output step (wall clock around `output ... run`). Do this for:
+Use one or two of the owner's real jobs (large crystal, 3D grid). Measure
+**wall-clock** time, e.g. `/usr/bin/time -f %e discus_suite -macro job.mac`.
+Subtract the time of the same macro with the `fourier ... run` block removed
+(start-up and structure reading). Do **not** use the `Elapsed time` DISCUS
+prints after `run`: it is `CPU_TIME`, the CPU time summed over all threads,
+so it never decreases with more threads and grows when idle threads spin.
+Time the 3D-PDF output step separately (wall clock around `output ... run`).
+Run nothing else at the same time, and give the median of 3 runs. Do this for:
 
 | Build | Settings |
 |---|---|
@@ -186,13 +191,20 @@ the 3D-PDF output step (wall clock around `output ... run`). Do this for:
 | `technique:nufft`, if the owner uses it | master vs branch |
 
 Report a table with core count, CPU model, crystal size (atoms), grid size,
-and times. For reference, cloud results on 2 cores:
-- **GEMM, 16k atoms, 101³:** 7.2 s → 2.3 s.
-- **Serial, same job:** 17.3 s → 6.0 s.
-- **3D-PDF FFT, 301³ (standalone):** 2.6 s → 0.5 s.
+and times. For reference, cloud results on 2 cores, wall clock, 16k atoms,
+101³ grid, including ~0.7 s start-up:
 
-If GEMM is slower than master on many cores, try
-`OPENBLAS_NUM_THREADS` equal to physical (not logical) cores, and report both.
+| Build | 1 thread | 2 threads |
+|---|---|---|
+| master | 24.7 s | 4.4 s |
+| `build-branch` (table kernel) | 8.1 s | 4.4 s |
+| `build-blas` (GEMM) | 2.7 s | 1.6 s |
+
+The 3D-PDF FFT on its own (301³, standalone) went from 2.6 s to 0.5 s.
+
+Since commit "GEMM kernel: distribute layers over OpenMP threads", `build-blas`
+switches OpenBLAS/MKL to one thread inside its own threaded loop. If it is
+still slower with more threads, also set `OPENBLAS_NUM_THREADS=1` and report both.
 
 ## 8. Report back
 
