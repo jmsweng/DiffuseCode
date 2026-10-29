@@ -1,5 +1,7 @@
 # Fourier / 3D-PDF performance benchmarks
 
+For a summary of all changes on this branch and the timing benchmarks, see [`CHANGES.md`](CHANGES.md).
+
 Standalone programs used to evaluate faster alternatives to the DISCUS
 "turbo" Fourier kernel (`four_strucf_*` in `discus/prog/four_strucf_OMP_mod.f90`)
 and the 3D-PDF FFT (`out_prep_3dpdf_3d` in `discus/prog/graphic.f90`).
