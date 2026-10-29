@@ -231,6 +231,10 @@ def build_cases():
     nufft('n_layer',   'x1',   'layer')
     nufft('n_skewlay', 'x1',   'skewlay')
     nufft('n_line',    'x1',   'line_ap')
+    # Lines (one point along the ordinate) never use the GEMM kernel, so the turbo side
+    # of this oracle is the 2^16 table kernel in every build: its error, not the
+    # NUFFT's, sets the tolerance (seen: 3.6e-5 on another machine/crystal).
+    C['n_line']['table_turbo'] = True
     nufft('n_thin',    'thin', 'thin3d')                   # cr_icc(3) = 1
     nufft('n_aniso2',  'x2',   'odd3d', pre=ANIS, temp='use')
     nufft('n_neut',    'x1',   'odd3d', radiation='neut')
@@ -408,6 +412,8 @@ def main():
                 failed += 1
                 continue
             tol = TOL[kind]
+            if kind == 'oracle' and cases[name].get('table_turbo'):
+                tol = max(tol, 1e-3)      # turbo side is always the table kernel here
             ok = tol is None or r['rel'] <= tol
             res = 'info' if tol is None else ('ok' if ok else 'FAIL (tol %.0e)' % tol)
             failed += 0 if ok else 1
