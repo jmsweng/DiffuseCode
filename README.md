@@ -21,6 +21,8 @@
 > an RMC test on Cu 6x6x6, on gfortran 13.3 and 11.4. Not tested: MPI with DISCUS
 > (3D) models, multi-data-set REFINE, RMC with ellipsoidal lots. The test kit and
 > handoff documents are kept at the tag `perf-refine-handoffs-final`.
+> See **[refine/CHANGES.md](refine/CHANGES.md)** for the details of every change,
+> the macro-run counts and the validation.
 
 Diffuse program collection
 ================================================================
