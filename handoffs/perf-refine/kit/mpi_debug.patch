@@ -1,0 +1,38 @@
+diff --git a/refine/prog/refine_run.f90 b/refine/prog/refine_run.f90
+index 129f17b..0c736e0 100644
+--- a/refine/prog/refine_run.f90
++++ b/refine/prog/refine_run.f90
+@@ -1272,6 +1272,7 @@ endif
+ ! Now evaluate all derivatives
+ !
+ loop_npara_eval: do k=1, NPARA
++   write(*,'(a,i3,a,l2,a,i3,a,i3)') ' DBG eval k=', k, ' gl_is_der=', gl_is_der(k), ' nder=', nder(k), ' nkids=', para_has(0,k)
+    cond_is_deriv_2: if(gl_is_der(k)) then
+       continue
+    else cond_is_deriv_2
+@@ -1286,8 +1287,10 @@ loop_npara_eval: do k=1, NPARA
+       write(string,'(a,i4.4)') 'h5, DISCUS_SUITE_DERIVATIVES/data.', j
+       call refine_kupl_last(0)
+       call do_load(string, j2, .FALSE.)
++      call dbg_kup(j)
+       call refine_load_calc(data_dim, refine_temp, l_deriv)
+       refine_tttt(:,:,:,l) = refine_temp(:,:,:)
++      write(*,'(a,i4,a,i3,a,i3,a,2es14.6,a,es14.6)') ' DBG kid=', j, ' k=', k, ' l=', l, ' sum/max(temp)=', sum(refine_temp), maxval(refine_temp), ' sum(calc)=', sum(refine_calc)
+    enddo
+ !
+    IF(nder(k)==5) THEN             ! Got all five  points for derivative
+@@ -2932,3 +2935,14 @@ END SUBROUTINE refine_best
+ !*******************************************************************************
+ !
+ END MODULE refine_run_mod
++
++subroutine dbg_kup(j)
++use kuplot_mod
++use errlist_mod
++implicit none
++integer, intent(in) :: j
++integer :: n
++n = max(1, iz-1)
++write(*,'(a,i4,a,i4,a,i3,a,i6,a,i3,a,3es12.4)') ' DBG after load kid=', j, ' iz=', iz, ' ndims=', ku_ndims(n), &
++   ' lenc=', lenc(n), ' ier=', ier_num, ' y=', y(offxy(n-1)+1:offxy(n-1)+3)
++end subroutine dbg_kup
