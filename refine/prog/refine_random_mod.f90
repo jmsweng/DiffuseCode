@@ -24,6 +24,9 @@ refine_nseed = random_nseeds()
 !
 CALL random_current(refine_nseed, refine_seeds)
 !CALL random_current(refine_seeds)
+CALL put_seeds(refine_nseed, refine_seeds)   ! Same state, but also drops a cached
+                                             ! GASDEV value, so the centre run starts
+                                             ! exactly like the restored derivative runs
 !
 END SUBROUTINE refine_save_seeds
 !

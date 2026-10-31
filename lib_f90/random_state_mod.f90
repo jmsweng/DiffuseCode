@@ -53,6 +53,8 @@ END SUBROUTINE random_current
 !
 SUBROUTINE put_seeds(nseeds, seed_val)
 !
+USE random_mod
+!
 IMPLICIT NONE
 !
 INTEGER              , INTENT(in) :: nseeds
@@ -60,6 +62,8 @@ INTEGER, DIMENSION(:), INTENT(in) :: seed_val
 !
 seed_vals = seed_val
 CALL RANDOM_SEED(PUT=seed_vals)    ! Use the global variable, is allocated to proper size
+iset = 0                           ! Discard the cached second GASDEV value, so the
+                                   ! Gaussian sequence depends only on the seeds put here
 !
 END SUBROUTINE put_seeds
 !
