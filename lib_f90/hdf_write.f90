@@ -93,6 +93,7 @@ TYPE(C_PTR)                            :: f_ptr           ! C-type pointer to da
 !  END FUNCTION qval
 !END INTERFACE
 !
+hdferr = 0
 if(.not. hdf5_get_state()) then
    CALL H5open_f(hdferr)                                     ! Open access to HDF5 stream
    call hdf5_set_state
@@ -407,6 +408,7 @@ character(len=PREC_STRING)             :: attr_name
 !
 !write(*,*) ' in gen_hdf5_nexus_scattering ', outfile(1:LEN_TRIM(outfile))
 !
+hdferr = 0
 if(.not. hdf5_get_state()) then
    call H5open_f(hdferr)                                     ! Open access to HDF5 stream
    call hdf5_set_state
