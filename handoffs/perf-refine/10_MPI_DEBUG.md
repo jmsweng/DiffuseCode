@@ -1,5 +1,7 @@
 # Handoff 10 — why does the MPI master see zero derivatives? (information gathering)
 
+> **Resolved, no need to run this.** Your run reproduced the cloud result. The cause was found afterwards: each worker saved only the single point at x = 0 of its curve (missing range in `kuplot_exit`). The fix is commit `d1edc81` and is part of handoff 09. This file is kept as a record.
+
 Follow-up to handoff 09, which ended `INCONCLUSIVE`: with MPI, both the unfixed and the fixed build stop with `All derivatives are zero; check user macro`. Requires 09 to have run (it creates the MPI build in `~/refine_validation/mpi`). This handoff **does not fix anything and does not change the repository**. It only gathers evidence.
 
 ## What is already known (from the cloud session)

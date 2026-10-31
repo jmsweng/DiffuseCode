@@ -15,8 +15,9 @@ This folder lives only on `perf/refine-handoffs` (= `perf/refine` + this folder)
 | [06](06_lazy_jacobian.md) | c6 | perf | Derivatives only for accepted LM steps | rejected step 2N+1 → 1 run, bit-identical |
 | [07](07_points2.md) | c7 | perf | New `points:2` one-sided derivatives | N instead of 2N runs per Jacobian (opt-in) |
 | [08](08_SUMMARY.md) | — | report | Macro-run table c0…c7 | — |
-| [09](09_MPI.md) | c1 | MPI check | Builds MPI binaries (fixed/unfixed) and runs a real `mpirun` fit | experimental; INCONCLUSIVE is an acceptable result |
-| [10](10_MPI_DEBUG.md) | — | diagnosis | Shows what the MPI master reads after the workers return (why 09 is inconclusive) | information only |
+| [09](09_MPI.md) | c1 (+ c8) | MPI check | Builds MPI binaries (with/without the c1 fix) and runs a real `mpirun` fit | cycle 0 chi²: serial 0.50458, MPI with fix 0.50458, without 244 |
+| [10](10_MPI_DEBUG.md) | — | diagnosis | Why the MPI master saw zero derivatives (resolved by c8) | record only |
+| — | c8 | fix | KUPLOT: the MPI worker returned only one point of its curve (commit `d1edc81`, after c7) | MPI refinement of a KUPLOT curve works; `kit/COMMITS` still lists c0–c7 |
 
 Macro runs (user-macro executions) per fit, measured in the cloud (gfortran 13.3), 4-parameter Gaussian fits, fixed seeds:
 

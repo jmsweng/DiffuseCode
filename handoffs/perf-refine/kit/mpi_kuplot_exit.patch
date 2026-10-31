@@ -1,0 +1,21 @@
+diff --git a/kuplot/prog/kuplot_exit.f90 b/kuplot/prog/kuplot_exit.f90
+index a391c64..c609d8d 100644
+--- a/kuplot/prog/kuplot_exit.f90
++++ b/kuplot/prog/kuplot_exit.f90
+@@ -76,6 +76,16 @@ if(lib_global_flags(1) == 1) then   ! Save last data set
+    werte  = 0.0_PREC_DP
+    l_m999 = .FALSE.
+    call check_form (ik, form, ianz, werte, MAXW)
++   if(.not.lh5(ik)) then           ! Not an HDF5 data set: save the whole data set
++      werte(1) = real(xmin(ik), kind=PREC_DP)    ! Without these limits 'save' writes
++      werte(2) = real(xmax(ik), kind=PREC_DP)    ! only the point at x = 0
++      ianz     = 2
++      if(lni(ik)) then
++         werte(3) = real(ymin(ik), kind=PREC_DP)
++         werte(4) = real(ymax(ik), kind=PREC_DP)
++         ianz     = 4
++      endif
++   endif
+    call do_save(ik, string, form, ianz, werte, MAXW, l_m999)
+ endif
+ !                                                                       
