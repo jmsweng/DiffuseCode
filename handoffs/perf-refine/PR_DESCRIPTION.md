@@ -53,11 +53,11 @@ A set of test fits (a Gaussian peak with 4 parameters, in KUPLOT only, plus an R
 - cloud, Ubuntu, gfortran 13.3
 - the author's laptop, Ubuntu 22.04 under WSL2, gfortran 11.4.0
 
-Both runs: all checks PASS for commits 1–7 (the numbers in the table above come from the first run; the second gave identical run counts). The MPI check (commits 1, 8 and 9) has so far been run in the cloud only.
+Both runs: all checks PASS for commits 1–7 (the numbers in the table above come from the first run; the second gave identical run counts). The MPI check (commits 1, 8 and 9) was run in both environments (the laptop: OpenMPI from Ubuntu 22.04, gfortran 11.4) with identical results.
 
 ### What is not tested
 
-- **MPI was tested only with a KUPLOT model and with OpenMPI 4.1.6 / gfortran 13.3, in one environment so far.** Four 4-parameter fits (easy start, far start with rejected steps, `points:5`, `points:2` far start) were run serially and with `mpirun -n 5` (4 workers): same number of cycles, same parameters and esd's (the last digit of an esd can differ), no errors. A build with the old step-size bug gives chi²/(N-P) 365 against 109 in cycle 0 of the `points:5` fit. Parallel REFINE with DISCUS models (3D data) was not tested.
+- **MPI was tested only with a KUPLOT model and with OpenMPI and gfortran 13.3 (cloud) and 11.4 (laptop).** Four 4-parameter fits (easy start, far start with rejected steps, `points:5`, `points:2` far start) were run serially and with `mpirun -n 5` (4 workers): same number of cycles, same parameters and esd's (the last digit of an esd can differ), no errors. A build with the old step-size bug gives chi²/(N-P) 365 against 109 in cycle 0 of the `points:5` fit. Parallel REFINE with DISCUS models (3D data) was not tested.
 - Only `points:2/3/5` with one data set were tested. Multi-data-set REFINE (`mrqcof` loops over data set 1's size for all sets) was left alone.
 - The RMC fix was tested with box lots and with box lots plus `fourier lots`, on one hk0 plane; ellipsoidal lots were not tested.
 
