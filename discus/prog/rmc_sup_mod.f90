@@ -2844,16 +2844,14 @@ integer, dimension(3) :: fnum ! number increments (reduced by Friedel)
       REAL(kind=PREC_DP) :: off (3) 
       INTEGER i_old (rmc_max_atom) 
       INTEGER i, il, iq, jq
+logical, dimension(rmc_nlots) :: l_first   ! rmc_csf_new of this lot is not yet set
 !                                                                       
 !     LOGICAL rmc_inlot 
 !                                                                       
-do jq = 1,rmc_num(2, ip)
-   do iq = 1,rmc_num(1, ip)
-      do il = 1, rmc_nlots
-         rmc_csf_new(iq,jq, ip, is,il) = rmc_csf(iq,jq, ip, is,il)
-      enddo
-   enddo
-enddo
+!     rmc_csf_new is not copied from rmc_csf here. The first update of a lot
+!     in rmc_strucf reads rmc_csf and writes rmc_csf_new (one pass instead of
+!     copy plus update). Lots that no atom touches are copied at the end.
+l_first = .true.
 !      DO i = 1, rmc_num (1, ip) * rmc_num (2, ip) 
 !      DO il = 1, rmc_nlots 
 !      rmc_csf_new (offsq (ip, is) + i, il) = rmc_csf (offsq (ip, is)    &                                      ! Clarify who are these "rmc" arrays ... Notice that here they are already 2D!!!
@@ -2876,15 +2874,27 @@ enddo
       DO il = 1, rmc_nlots 
       DO i = 1, natoms 
       IF (rmc_inlot (isel (i), il, off) ) then 
-         CALL rmc_strucf (i_old (i), p_old, i, is, ip, il, off, .false., fnum) 
-         CALL rmc_strucf (i_new (i), p_new, i, is, ip, il, off, .true., fnum) 
+         CALL rmc_strucf (i_old (i), p_old, i, is, ip, il, off, .false., fnum, l_first(il)) 
+         CALL rmc_strucf (i_new (i), p_new, i, is, ip, il, off, .true., fnum, l_first(il)) 
       ENDIF 
       ENDDO 
       ENDDO 
 !                                                                       
+!     Lots without any update still need the current amplitudes
+!                                                                       
+      DO il = 1, rmc_nlots 
+         IF(l_first(il)) THEN 
+            do jq = 1,rmc_num(2, ip)
+               do iq = 1,rmc_num(1, ip)
+                  rmc_csf_new(iq,jq, ip, is,il) = rmc_csf(iq,jq, ip, is,il)
+               enddo
+            enddo
+         ENDIF 
+      ENDDO 
+!                                                                       
       END SUBROUTINE rmc_fcalc                      
 !*****7*****************************************************************
-      SUBROUTINE rmc_strucf (iscat, pos, isite, is, ip, il, off, lplus, fnum) 
+      SUBROUTINE rmc_strucf (iscat, pos, isite, is, ip, il, off, lplus, fnum, l_first) 
 !+                                                                      
 !     Here is the real calculation :-)                                  
 !-                                                                      
@@ -2906,6 +2916,7 @@ use precision_mod
       INTEGER, INTENT(IN) :: il
       LOGICAL, INTENT(IN) :: lplus 
 integer, dimension(3), intent(in) :: fnum ! Number increments (reduced by Friedel)
+LOGICAL, INTENT(INOUT) :: l_first   ! .true.: rmc_csf_new of this lot is not yet set, start from rmc_csf
 !                                                                       
       INTEGER:: iq, jq 
 !                                                                       
@@ -2918,6 +2929,22 @@ integer, dimension(3), intent(in) :: fnum ! Number increments (reduced by Friede
 !                                                                       
       CALL four_strucf (iscat, .true., .false., .false., 1, 1, fnum) 
 !                                                                       
+      IF (l_first) THEN                   ! First update of this lot: read rmc_csf, write rmc_csf_new
+         l_first = .false.
+         IF (lplus) THEN 
+            do jq = 1,rmc_num (2, ip)
+            do iq = 1,rmc_num (1, ip)
+            rmc_csf_new(iq,jq,ip, is,il) = rmc_csf(iq,jq,ip, is,il) + tcsf(iq,jq, 1)
+            enddo
+            enddo
+         ELSE 
+            do jq = 1,rmc_num (2, ip)
+            do iq = 1,rmc_num (1, ip)
+            rmc_csf_new(iq,jq,ip, is,il) = rmc_csf(iq,jq,ip, is,il) - tcsf(iq,jq, 1)
+            enddo
+            enddo
+         ENDIF 
+      ELSE 
       IF (lplus) then 
          do jq = 1,rmc_num (2, ip)
          do iq = 1,rmc_num (1, ip)
@@ -2938,6 +2965,7 @@ integer, dimension(3), intent(in) :: fnum ! Number increments (reduced by Friede
 !        rmc_csf_new (offsq (ip, is) + i, il) = rmc_csf_new (offsq (ip, &                                ! Clarify who are these "rmc" arrays ... Notice that here they are already 2D!!!
 !        is) + i, il) - tcsf (i)                                        
 !        ENDDO 
+      ENDIF 
       ENDIF 
 !                                                                       
       END SUBROUTINE rmc_strucf                     
@@ -3033,7 +3061,22 @@ use precision_mod
       INTEGER, DIMENSION(  RMC_MAX_ATOM), INTENT(IN) :: imol  !(rmc_max_atom) 
 !                                                                       
       INTEGER i, j, ip, iq, jq, is, il 
+COMPLEX (KIND=KIND(0.0D0)), DIMENSION(:,:,:,:,:), ALLOCATABLE :: csf_swap
+LOGICAL :: l_swap
 !                                                                       
+!     rmc_fcalc has written rmc_csf_new for every plane, symmetry operation and lot
+!     used here. The accepted amplitudes are made current by exchanging the two
+!     arrays instead of copying them. Both arrays have the same shape.
+!
+      l_swap = .false.
+      IF(ALLOCATED(rmc_csf) .AND. ALLOCATED(rmc_csf_new)) THEN
+         l_swap = ALL(SHAPE(rmc_csf)==SHAPE(rmc_csf_new)) .AND. ALL(LBOUND(rmc_csf)==LBOUND(rmc_csf_new))
+      ENDIF
+      IF(l_swap) THEN
+         CALL MOVE_ALLOC(rmc_csf    , csf_swap)
+         CALL MOVE_ALLOC(rmc_csf_new, rmc_csf )
+         CALL MOVE_ALLOC(csf_swap   , rmc_csf_new)
+      ELSE
       DO ip = 1, rmc_nplane 
       DO is = 1, isym (ip) 
       DO jq = 1, rmc_num (2, ip)
@@ -3047,6 +3090,7 @@ use precision_mod
       ENDDO 
       ENDDO 
       ENDDO 
+      ENDIF 
 !                                                                       
       DO i = 1, natoms 
       cr_iscat (1,isel (i) ) = i_new (i) 
