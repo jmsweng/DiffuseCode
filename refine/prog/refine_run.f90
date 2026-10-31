@@ -622,6 +622,27 @@ ELSE is_deriv
             endif
          ENDIF if_delta
 !
+         IF(p_nderiv(k)==2) THEN               ! Two point (one-sided) derivative
+            IF(prange(k,1)<=prange(k,2)) THEN  ! Keep the shifted point inside the range
+               IF(p(k)+delta <= prange(k,2)) THEN
+                  dvec(1) = p(k) + delta
+                  lvec(1) = .TRUE.
+               ELSEIF(p(k)-delta >= prange(k,1)) THEN
+                  dvec(-1) = p(k) - delta
+                  lvec(-1) = .TRUE.
+               ELSEIF(prange(k,2)-p(k) >= p(k)-prange(k,1)) THEN
+                  dvec(1) = p(k) + 0.5D0*(prange(k,2)-p(k))
+                  lvec(1) = .TRUE.
+               ELSE
+                  dvec(-1) = p(k) - 0.5D0*(p(k)-prange(k,1))
+                  lvec(-1) = .TRUE.
+               ENDIF
+            ELSE
+               dvec(1) = p(k) + delta
+               lvec(1) = .TRUE.
+            ENDIF
+            IF((lvec(1) .and. dvec(1)/=p(k)) .or. (lvec(-1) .and. dvec(-1)/=p(k))) nder = 2  ! Step must not vanish
+         ELSE
 !                                     ! Test at P + DELTA
          IF(prange(k,1)<=prange(k,2)) THEN     ! User provided parameter range
             IF(p(k)==prange(k,1)) THEN         ! At lower limit, use +delta +2delta
@@ -681,6 +702,7 @@ ELSE is_deriv
             ENDIF
 !           p_d     = p(k) + delta
          ENDIF
+         ENDIF                                 ! p_nderiv(k)==2
          DO l = -2, 2
             IF(lvec(l)) THEN
             CALL refine_set_param(NPARA, par_names(k), k, (dvec(l)) )  ! Set modified value
@@ -727,6 +749,20 @@ ELSE is_deriv
                                                     (12.*delta)
                ENDDO
             ENDDO
+            enddo
+         ELSEIF(nder==2) THEN             ! One-sided difference with the centre point
+            IF(lvec(1)) THEN
+               j2 =  1
+            ELSE
+               j2 = -1
+            ENDIF
+            do iiz=1, data_dim(3,1)
+               DO iiy=1, data_dim(2,1)
+                  DO iix=1, data_dim(1,1)
+                     refine_derivs(iix, iiy, iiz, k) = (refine_tttt(iix,iiy,iiz,j2) - refine_calc(iix,iiy,iiz)) / &
+                                                       (dvec(j2) - p(k))
+                  ENDDO
+               ENDDO
             enddo
          ELSEIF(nder==3) THEN             ! Got all three points for derivative
             xmat(:,1) =  1.0
@@ -1190,6 +1226,27 @@ loop_npara_init: do k=1, NPARA
             endif
          ENDIF cond_if_delta
 !
+         IF(p_nderiv(k)==2) THEN               ! Two point (one-sided) derivative
+            IF(prange(k,1)<=prange(k,2)) THEN  ! Keep the shifted point inside the range
+               IF(p(k)+delta(k) <= prange(k,2)) THEN
+                  dvec(1,k) = p(k) + delta(k)
+                  lvec(1,k) = .TRUE.
+               ELSEIF(p(k)-delta(k) >= prange(k,1)) THEN
+                  dvec(-1,k) = p(k) - delta(k)
+                  lvec(-1,k) = .TRUE.
+               ELSEIF(prange(k,2)-p(k) >= p(k)-prange(k,1)) THEN
+                  dvec(1,k) = p(k) + 0.5D0*(prange(k,2)-p(k))
+                  lvec(1,k) = .TRUE.
+               ELSE
+                  dvec(-1,k) = p(k) - 0.5D0*(p(k)-prange(k,1))
+                  lvec(-1,k) = .TRUE.
+               ENDIF
+            ELSE
+               dvec(1,k) = p(k) + delta(k)
+               lvec(1,k) = .TRUE.
+            ENDIF
+            IF((lvec(1,k) .and. dvec(1,k)/=p(k)) .or. (lvec(-1,k) .and. dvec(-1,k)/=p(k))) nder(k) = 2  ! Step must not vanish
+         ELSE
 !                                     ! Test at P + DELTA
       IF(prange(k,1)<=prange(k,2)) THEN     ! User provided parameter range
          IF(p(k)==prange(k,1)) THEN         ! At lower limit, use +delta +2delta
@@ -1249,6 +1306,7 @@ loop_npara_init: do k=1, NPARA
          ENDIF
 !           p_d     = p(k) + delta
       ENDIF
+         ENDIF                                 ! p_nderiv(k)==2
 !
 !     Populate trial values for DIFFEV
 !
@@ -1342,6 +1400,20 @@ loop_npara_eval: do k=1, NPARA
                                                   -8.0*refine_tttt(iix,iiy,iiz,-1)   &
                                                   +1.0*refine_tttt(iix,iiy,iiz,-2))/ &
                                                  (12.*delta(k))
+            ENDDO
+         ENDDO
+      enddo
+   ELSEIF(nder(k)==2) THEN             ! One-sided difference with the centre point
+      IF(lvec(1,k)) THEN
+         j2 =  1
+      ELSE
+         j2 = -1
+      ENDIF
+      do iiz=1, data_dim(3,1)
+         DO iiy=1, data_dim(2,1)
+            DO iix=1, data_dim(1,1)
+               refine_derivs(iix, iiy, iiz, k) = (refine_tttt(iix,iiy,iiz,j2) - refine_calc(iix,iiy,iiz)) / &
+                                                 (dvec(j2,k) - p(k))
             ENDDO
          ENDDO
       enddo
