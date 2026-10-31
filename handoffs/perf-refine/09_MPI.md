@@ -26,7 +26,7 @@ If it prints `MISSING`, stop and tell the owner to run `sudo apt install -y libo
 ## Run (PowerShell, one command)
 The first run builds the two binaries; if the tool call times out, run the same command again (finished binaries are kept in `~/refine_validation/mpi`).
 ```powershell
-wsl -e bash -lc "cp ~/refine_validation/src/handoffs/perf-refine/kit/mpi_check.sh ~/refine_validation/kit/ && cd ~/refine_validation && { echo; echo '## 09 mpi'; echo; echo '~~~'; bash kit/mpi_check.sh; echo '~~~'; } 2>&1 | tee -a REPORT.md | tail -n 40"
+wsl -e bash -lc "git -C ~/refine_validation/src fetch -q origin && git -C ~/refine_validation/src checkout -q perf/refine-handoffs && git -C ~/refine_validation/src reset -q --hard origin/perf/refine-handoffs && cp ~/refine_validation/src/handoffs/perf-refine/kit/mpi_check.sh ~/refine_validation/kit/ && cd ~/refine_validation && { echo; echo '## 09 mpi'; echo; echo '~~~'; bash kit/mpi_check.sh; echo '~~~'; } 2>&1 | tee -a REPORT.md | tail -n 40"
 ```
 
 ## Possible results
