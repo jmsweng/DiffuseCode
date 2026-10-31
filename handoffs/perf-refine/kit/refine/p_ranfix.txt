@@ -1,0 +1,5 @@
+newparam P_amp, value:6.0
+newparam P_cen, value:0.2
+newparam P_wid, value:1.0
+newparam P_bg,  value:0.2
+set conver, status:off

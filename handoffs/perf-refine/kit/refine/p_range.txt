@@ -1,0 +1,4 @@
+newparam P_amp, value:6.0
+newparam P_cen, value:0.2
+newparam P_wid, value:1.0, range:[1.0,3.0]
+newparam P_bg,  value:0.2, range:[0.0,1.0]

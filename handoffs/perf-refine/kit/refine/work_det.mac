@@ -1,0 +1,5 @@
+branch kuplot
+i[90] = i[90] + 1
+func P_amp*exp(0.0-((r[0]-P_cen)/P_wid)**2) + P_bg, F_DATA
+exit
+finished

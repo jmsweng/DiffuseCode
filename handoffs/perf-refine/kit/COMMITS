@@ -1,0 +1,9 @@
+# c0 = upstream base, c1..c7 = commits of perf/refine (oldest first)
+6fd5f336552d8ac270244d340026dab4e74816df c0 upstream base: refine_data_mod.f90 was moved ti lib_f90
+2e95b93200d1ac5e69d3d3381b0b73568995444a c1 REFINE: fix MPI derivative step sizes being overwritten
+df2b814a1a2827707554d04863aaa3ae9fea2269 c2 Make seed restore reproduce Gaussian random numbers
+a299cfa8f959847a922973584e85110f891c6107 c3 RMC: fix refinement with lots
+368094c69bb13408ab19cffe60fd833bf067fec5 c4 REFINE: compute the dP/sigma convergence measure from the parameter sigmas
+5d65bcbf9453886feafc13f36d45ac729db8a044 c5 REFINE: skip the repeated centre run after the derivatives
+863bb4f238d17c6db40b1540877adc91e9eed19c c6 REFINE: compute derivatives only for accepted steps
+f40b2b54cbaa58080d57d921874db1af38e50acf c7 REFINE: add two-point (one-sided) derivatives, 'points:2'

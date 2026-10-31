@@ -1,0 +1,7 @@
+variable real, P_cen
+variable real, P_wid
+variable real, P_bg
+P_cen = 0.7
+P_wid = 1.3
+P_bg  = 0.5
+newparam P_amp, value:6.0

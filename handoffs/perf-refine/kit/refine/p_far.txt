@@ -1,0 +1,5 @@
+newparam P_amp, value:3.0
+newparam P_cen, value:2.0
+newparam P_wid, value:0.6
+newparam P_bg,  value:1.5
+set conver, lambda:1.0e10

@@ -1,0 +1,4 @@
+newparam P_amp, value:6.0, points:5
+newparam P_cen, value:0.2, points:5
+newparam P_wid, value:1.0, points:5
+newparam P_bg,  value:0.2, points:5
