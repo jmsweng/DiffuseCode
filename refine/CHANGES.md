@@ -127,7 +127,13 @@ Which results can change, in short:
 
 - MPI: send the centre run together with the derivative runs.
 - Broyden-type Jacobian updates.
-- RMC: avoid copying all amplitudes on every move.
+- **RMC: avoid copying all amplitudes on every move.** Per trial move, `rmc_fcalc` copies the stored scattering amplitudes (`rmc_csf`) into a work array (`rmc_csf_new`) for the whole plane and all lots, and `rmc_makemove` copies them back when the move is accepted. Both copies scale with the size of the reciprocal-space grid, not with the number of atoms moved. It can be done without them: the first update of each lot reads `rmc_csf` and writes `rmc_csf_new` directly, and an accepted move exchanges the two arrays with `MOVE_ALLOC`. This was implemented and tested (bit-identical output on three RMC fits; 201×201 grid, 864 atoms: −9.9 % instructions, about 5 % wall time for 3000 moves on one thread), and then left out on purpose:
+  - *The gain is small.* Most of an RMC move is the Fourier transform of the moved atom (`four_strucf`, about two thirds of the instructions in the profile). The copies were about 8.6 %. A speed-up that is hard to tell from run-to-run noise does not justify a change that others have to review.
+  - *It is more invasive than the other items.* It adds an argument to `rmc_strucf` and makes `rmc_csf` and `rmc_csf_new` swap roles after every accepted move, so any code that assumes which array holds the current amplitudes would break silently. Nothing in the current source does, but that is a property of the whole program, and the RMC code is old and little tested.
+  - *It is less well tested than the rest.* It was run only in the cloud, with a small test case (Cu 6×6×6, one hk0 plane, box lots). Atom-swap moves (`swchem`), several planes and symmetry operations at once, and large lot counts were not run. The other items were checked in two environments.
+  - *The real cost is elsewhere.* The larger saving would come from a cheaper `four_strucf` for a single atom (it is evaluated twice per moved atom, for the old and the new position), which is a bigger change in the shared Fourier code and out of scope here.
+
+  **The code is kept in the history of this branch:** commit `80ea6bb` ("RMC: do not copy all scattering amplitudes for every move") adds it and commit `41b21e2` reverts it, together with the documentation that went with it. To read it, run `git show 80ea6bb`; to use it, `git cherry-pick 80ea6bb` (it touches only `discus/prog/rmc_sup_mod.f90`). If the RMC cost becomes a problem on a large model, profile first (`valgrind --tool=callgrind`); if the copies show up as a large share, apply it.
 - `seed <n>` with a single value is not reproducible (the other seed words come from the clock); the tests therefore set all 8.
 
 ## Test kit
