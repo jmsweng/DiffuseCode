@@ -1127,9 +1127,9 @@ loop_npara_init: do k=1, NPARA
          cond_if_delta: IF(p(k)/=0.0) THEN
 !           delta(k) = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
             if(p_shift(k)<0.0D0) then     ! An additive variation is requested
-               delta = ABS(     p_shift(k))  ! An additive shift is requested
+               delta(k) = ABS(     p_shift(k))  ! An additive shift is requested
             else
-               delta = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
+               delta(k) = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
             endif
          ELSE cond_if_delta
             do i=1, REF_MAXPARAM_SPC      ! Check for special names
@@ -1140,7 +1140,7 @@ loop_npara_init: do k=1, NPARA
                endif
             enddo
             if(p_shift(k)<0.0D0) then     ! An additive variation is requested
-               delta = ABS(     p_shift(k))  ! An additive shift is requested
+               delta(k) = ABS(     p_shift(k))  ! An additive shift is requested
             else
 !              delta = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
                delta(k) = 1.0D-4                ! Default delta for unknown variables
