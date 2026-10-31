@@ -1834,11 +1834,12 @@ cycles:DO
          EXIT cycles
       endif
       last_p(last_i,k) = p(k)
-      IF(cl(k,k)/= 0.0) THEN
-!        last_shift(last_i) = MAX(last_shift(last_i), ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k)))) !/SQRT(cl(k,k))))
-         IF(ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k))) > last_shift(last_i)) THEN
+!     Shift relative to the parameter sigma dp(k) from the covariance matrix.
+!     (cl holds the curvature matrix alpha after mrqmin, not the covariance)
+      IF(dp(k) > 0.0) THEN
+         IF(ABS((p(k)-last_p(prev_i,k))/dp(k)) > last_shift(last_i)) THEN
             last_ind = k
-            last_shift(last_i) = ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k)))
+            last_shift(last_i) = ABS((p(k)-last_p(prev_i,k))/dp(k))
          ENDIF
       ENDIF
    ENDDO
