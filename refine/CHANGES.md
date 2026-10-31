@@ -2,7 +2,7 @@
 
 **Branch:** [`perf/refine`](https://github.com/jmsweng/DiffuseCode/tree/perf/refine) on `jmsweng/DiffuseCode`, a fork of `tproffen/DiffuseCode`
 **Base:** `master` @ `6fd5f33` (upstream, 28 Oct 2026)
-**Status (31 Oct 2026):** every commit was checked against the one before it in the cloud (gfortran 13.3) and on a laptop (Ubuntu 22.04 under WSL2, gfortran 11.4), with identical results. MPI was checked in both environments with OpenMPI.
+**Status (31 Oct 2026):** every commit (item 10 only in the cloud) was checked against the one before it in the cloud (gfortran 13.3) and on a laptop (Ubuntu 22.04 under WSL2, gfortran 11.4), with identical results. MPI was checked in both environments with OpenMPI.
 
 ## Summary
 
@@ -12,9 +12,10 @@ This branch:
 
 1. fixes five bugs that gave wrong derivatives, wrong convergence figures or no result at all: MPI step sizes (1), the seed restore (2), RMC with lots (3), the `dP/sigma` measure (4), and two MPI problems found while testing (8, 9);
 2. removes macro runs that do not change the result: the second run at the centre point (5) and derivatives at rejected steps (6);
-3. adds an opt-in one-sided derivative that needs half the runs (7).
+3. adds an opt-in one-sided derivative that needs half the runs (7);
+4. makes each RMC move cheaper by no longer copying the whole amplitude array twice (10).
 
-Items 5 and 6 give bit-identical results. Items 1, 2, 3, 4, 8 and 9 change results only where the old code was wrong.
+Items 5, 6 and 10 give bit-identical results. Items 1, 2, 3, 4, 8 and 9 change results only where the old code was wrong.
 
 ## Changes
 
@@ -29,6 +30,7 @@ Items 5 and 6 give bit-identical results. Items 1, 2, 3, 4, 8 and 9 change resul
 | 7 | **`points:2`** (new, opt-in). `(f(p+h) − f(p))/h` needs one extra run per parameter instead of two. The default stays `points:3`. Help text and the error message for invalid `points:` values are updated; `refine_calc_deriv_mpi` handles it | `refine/prog/refine_run.f90`, `refine_add_param.f90`, `refine_err_appl.f90`, `appl_ref.hlp` | Only with `newparam ..., points:2` | N instead of 2N runs per Jacobian. Suited to smooth parameters such as scale factors (error ∝ h instead of h²) |
 | 8 | **KUPLOT result for the MPI master** (bug fix). Each worker returns its last KUPLOT data set as `DISCUS_SUITE_DERIVATIVES/data.nnnn`. `kuplot_exit` called `check_form` with no limits, which for the format H5 leaves the limits at zero, and `do_save` then wrote only the range 0..0, the single point at x = 0, for any data set not read from an HDF5 file. The master loaded a 1×1×1 data set and read every derivative run as the original data | `kuplot/prog/kuplot_exit.f90` | MPI refinement of a KUPLOT curve or NIPL map | Before, no such MPI refinement finished (`All derivatives are zero`) |
 | 9 | **HDF5 write** (bug fix). `hdferr` was tested uninitialised when the HDF5 library was already open, so a worker's second write failed with a false `Error opening file`. `hdferr = 0` is now set before the tests (two places) | `lib_f90/hdf_write.f90` | Any HDF5 write after the first one | Multi-cycle MPI fits work |
+| 10 | **RMC: no full copy of the amplitudes per move.** For every trial move `rmc_fcalc` copied `rmc_csf` into `rmc_csf_new` (the whole plane, all lots) before updating it, and `rmc_makemove` copied it back when the move was accepted. Both copies scale with the size of the reciprocal-space grid, not with the number of atoms moved. Now the first update of a lot in `rmc_strucf` reads `rmc_csf` and writes `rmc_csf_new` (no separate copy-in; lots that no atom touches are still copied), and an accepted move exchanges the two arrays with `MOVE_ALLOC`. A plain copy remains as a fallback if the arrays ever differ in shape | `discus/prog/rmc_sup_mod.f90` | Always, in every RMC run | Bit-identical. 201×201 grid, 864 atoms, 150 moves: 2.351·10⁹ → 2.119·10⁹ instructions (−9.9 %); 3000 moves, 1 thread: 2.61 s → 2.48 s (about 5 %). `rmc_fcalc` and `rmc_makemove` no longer show up in the profile |
 
 Also changed: the help text for `newparam` (`points:2`).
 
@@ -45,8 +47,9 @@ Also changed: the help text for `newparam` (`points:2`).
 | `f40b2b5` | REFINE: add two-point (one-sided) derivatives, `points:2` |
 | `d1edc81` | KUPLOT: save the complete data set when it is returned to the REFINE master |
 | `0d73677` | HDF5 write: initialise hdferr before testing it |
+| `80ea6bb` | RMC: do not copy all scattering amplitudes for every move |
 
-9 source files changed, +232 / −70 lines. Each commit builds on its own; 5 → 6 → 7 depend on each other. Any prefix of the series can be merged.
+9 source files changed, +286 / −80 lines. Each commit builds on its own; 5 → 6 → 7 depend on each other. Any prefix of the series can be merged.
 
 ## Cost
 
@@ -68,6 +71,9 @@ Parameters, esd's and chi² of the deterministic cases are the same in every col
 
 ### Serial checks (commits 1–7)
 For each commit, the binary built before it and the one built after it run the same fits. Compared: cycle tables, parameters, esd's, chi² and macro-run counts. Fits: a 4-parameter Gaussian (easy start, far start, 25 fixed cycles, `gran()` noise, 5-point, `points:2`) and an RMC test on Cu 6×6×6 with box lots and with `fourier lots`. Result: all checks pass, in both environments, with identical run counts.
+
+### RMC speed-up (item 10)
+The old and the new binary run the same RMC fits (Cu 6×6×6, 300 moves, fixed seeds: no lots, box lots, box lots with `fourier lots`; the box-lot cases leave lots without atoms, which exercises the fallback copy). Compared: the complete program output (acceptance counts, chi², delta chi statistics). Result: identical in all three cases. Timing: 201×201 grid, 864 atoms, instruction counts from `valgrind --tool=callgrind`, wall time as the median of three runs.
 
 ### MPI checks (commits 1, 8, 9, and the speed-ups under MPI)
 An MPI build of the tip runs four fits serially and with `mpirun -n 5` (4 workers, so each worker handles several derivative runs per cycle):
@@ -104,6 +110,7 @@ Which results can change, in short:
 | 5, 6 | number of macro runs | same | — | no |
 | 7 | only if `points:2` is used | same | — | no |
 | 8, 9 | — | every MPI refinement of a KUPLOT curve | — | `master` gave no result |
+| 10 | — | — | every RMC run | no |
 
 ### Where the numbers change (bug fixes)
 
@@ -121,13 +128,14 @@ Which results can change, in short:
   - The program state after a cycle is the one a repeated centre run would have left. The one exception is a per-cycle plot macro (`run ..., plot:`) and MPI, which keep the repeated centre run, because the plot reads the data in KUPLOT and the MPI master loads the derivative results into KUPLOT.
   - Derivatives that the user supplies analytically are not affected.
   - Anything that counted macro runs to find out how many cycles a fit took should count the lines of the cycle table instead.
+- **Item 10 (RMC copies).** Results are bit-identical: the new code does the same floating-point operations in the same order (`csf − tcsf` instead of copying `csf` and then subtracting). The only difference is the time per move, and memory behaviour: `rmc_csf` and `rmc_csf_new` change roles after every accepted move, so code outside `rmc_sup_mod.f90` must not assume which of the two arrays holds which data (nothing in the source does).
 - **Item 7 (`points:2`).** Nothing changes unless a parameter is declared with `points:2`. The default stays `points:3`. The error message for an invalid `points:` value now also names the allowed value 2. Use it for smooth parameters; the one-sided difference has an error proportional to the step, not its square, so a parameter with strong curvature or a small step on a noisy model can give worse derivatives than `points:3`.
 
 ## Not included (found during the review)
 
 - MPI: send the centre run together with the derivative runs.
 - Broyden-type Jacobian updates.
-- RMC: avoid copying all amplitudes on every move.
+- RMC: the Fourier transform of the moved atom (`four_strucf`) still dominates a move (about two thirds of the time in the profile); the amplitude copies were the part that was cheap to remove.
 - `seed <n>` with a single value is not reproducible (the other seed words come from the clock); the tests therefore set all 8.
 
 ## Test kit
