@@ -8,6 +8,7 @@ IMPLICIT NONE
 REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_calc     ! Calculated (ix, iy)
 REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_temp     ! Calculated (ix, iy) for derivs
 REAL(kind=PREC_DP), DIMENSION(:,:,:, :), ALLOCATABLE :: refine_derivs   ! Derivativs (ix, iy, parameter)
+LOGICAL :: refine_rerun_centre = .TRUE.   ! Repeat the centre run after the derivatives
 !
 CONTAINS
 !
@@ -154,6 +155,7 @@ IF(opara(OPLOT) /= ' ') THEN
   ref_do_plot = .TRUE.
   refine_plot_mac       = opara(OPLOT)
 ENDIF
+refine_rerun_centre = ref_do_plot   ! The plot macro reads the calculated data in KUPLOT
 !
 ALLOCATE(refine_calc  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
 ALLOCATE(refine_temp  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
@@ -357,6 +359,7 @@ INTEGER              :: k ! Dummy loop variable
 integer :: tid
 integer :: nthreads
 logical :: lserial
+logical :: l_numeric                ! At least one derivative needs macro runs
 !character(len=PREC_STRING) :: string
 !integer :: iix
 !
@@ -387,6 +390,7 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
 !write(*,*) ' INTO      MACRO ', ier_num, ier_typ
    CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
                      data_dim, refine_calc, l_data)
+   CALL refine_save_seeds_post        ! Random state as left by the centre run
 !write(*,*) ' BACK FROM MACRO ', ier_num, ier_typ
    CALL gl_set_data(data_dim(1,1), data_dim(2,1), data_dim(3,1), -1,  &
         refine_calc(1:data_dim(1,1),1:data_dim(2,1),1:data_dim(3,1)))
@@ -437,14 +441,30 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
 !enddo
 !close(55)
 !enddo
-   ENDIF if_deriv
-   if(.not.(gl_is_der(1) .and. gl_is_der(2))) then
+!
+!  The derivative runs leave the macro state (structure, KUPLOT data, random
+!  generator) at a shifted parameter value. refine_calc already holds the
+!  centre values, so the centre run is repeated only if something reads that
+!  state before the next run: the per-cycle plot, or MPI, where the master
+!  loads the derivative results into KUPLOT. Otherwise the random generator is
+!  put where a repeated centre run would have left it.
+!
+      l_numeric = .false.               ! Any derivative calculated by macro runs?
+      do k=1, NPARA
+         if(.not. gl_is_der(k)) l_numeric = .true.
+      enddo
+      if(l_numeric) then
+         if(refine_rerun_centre .or. mpi_active) then
             CALL refine_restore_seeds
 !write(*,*) 'DERIV INTO MACRO ', ier_num, ier_typ
-   CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
-                     data_dim, refine_calc, l_data)
+            CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
+                              data_dim, refine_calc, l_data)
 !write(*,*) 'DERIV FROM MACRO ', ier_num, ier_typ
-   endif
+         else
+            CALL refine_restore_seeds_post
+         endif
+      endif
+   ENDIF if_deriv
 !write(*,*) ' GOT FINAL   ', lderiv, minval(refine_calc),maxval(refine_calc), p(1:2)
 !write(*,*) ' DERIVS Fin  ', 1, minval(refine_derivs(:,:,:,1)), maxval(refine_derivs(:,:,:,1))
 !write(*,*) ' DERIVS Fin  ', 2, minval(refine_derivs(:,:,:,2)), maxval(refine_derivs(:,:,:,2))
