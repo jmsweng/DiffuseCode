@@ -1,34 +1,32 @@
 #!/bin/bash
-# Handoff 09: does the MPI derivative fix (c1) change a real MPI refinement?
-# Builds two MPI-enabled binaries (mpi_c0k = upstream refine_run.f90, mpi_c1k = with the fix; both with
-# the KUPLOT exit patch mpi_kuplot_exit.patch, without which no MPI fit with a KUPLOT curve can finish),
-# runs a 2-parameter, 5-point-derivative fit serially (reference) and under mpirun, and compares the first cycle.
-#   bash mpi_check.sh            full run (build if needed)
-# Environment overrides (to reuse prebuilt binaries): MPI_C0, MPI_C1, SERIAL_BIN
+# Handoff 09: do refinements under MPI give the same result as serial ones?
+# Builds an MPI-enabled discus_suite from the tip of origin/perf/refine, and a variant with the old
+# step-size bug (kit/mpi_delta_unfix.patch). Runs four 4-parameter fits serially (bins/c7 of handoff 00)
+# and under mpirun with 5 ranks (4 workers, so every worker is used in every cycle), and compares them.
+#   bash mpi_check.sh
+# Environment overrides (to reuse prebuilt binaries): MPI_TIP, MPI_UNFIXED, SERIAL_BIN, MPIRUN_OPTS
 set -uo pipefail
 ROOT=~/refine_validation
 KIT=$ROOT/kit
 M=$ROOT/mpi
 SRC=$ROOT/src
-mapfile -t SHAS < <(grep -v '^#' $KIT/COMMITS | awk '{print $1}')
-C0=${SHAS[0]}; C1=${SHAS[1]}
-MPI_C0=${MPI_C0:-$M/mpi_c0k}
-MPI_C1=${MPI_C1:-$M/mpi_c1k}
-SERIAL_BIN=${SERIAL_BIN:-$ROOT/bins/c1}
+SERIAL_BIN=${SERIAL_BIN:-$ROOT/bins/c7}
+MPI_TIP=${MPI_TIP:-$M/mpi_tip}
+MPI_UNFIXED=${MPI_UNFIXED:-$M/mpi_tip_unfixed}
 mkdir -p $M
 
 fail() { echo "RESULT: FAIL ($1)"; exit 1; }
-inconclusive() { echo "RESULT: INCONCLUSIVE ($1)"; exit 2; }
 
 command -v mpif90 >/dev/null && command -v mpirun >/dev/null && command -v script >/dev/null \
   || fail "OpenMPI or 'script' missing; needs: sudo apt install -y libopenmpi-dev openmpi-bin bsdutils"
+[ -x "$SERIAL_BIN" ] || fail "$SERIAL_BIN missing (run handoff 00 first)"
 
 # ---- 1. build the two MPI binaries (skipped when they exist) -------------------------------
-if [ ! -x "$MPI_C1" ] || [ ! -x "$MPI_C0" ]; then
-  [ -d $M/wt ] || git -C $SRC worktree add --detach $M/wt $C1 >/dev/null 2>&1 || fail "git worktree"
-  git -C $M/wt checkout -q --detach $C1
-  git -C $M/wt checkout -q -- kuplot/prog/kuplot_exit.f90 refine/prog/refine_run.f90
-  git -C $M/wt apply $KIT/mpi_kuplot_exit.patch || fail "kit/mpi_kuplot_exit.patch does not apply"
+if [ ! -x "$MPI_TIP" ] || [ ! -x "$MPI_UNFIXED" ]; then
+  git -C $SRC fetch -q origin || fail "git fetch"
+  TIP=$(git -C $SRC rev-parse origin/perf/refine) || fail "origin/perf/refine not found"
+  [ -d $M/wt ] || git -C $SRC worktree add --detach $M/wt $TIP >/dev/null 2>&1 || fail "git worktree"
+  git -C $M/wt checkout -q -- . && git -C $M/wt checkout -q --detach $TIP || fail "checkout $TIP"
   mkdir -p $M/build && cd $M/build
   if [ ! -f CMakeCache.txt ]; then
     FC=$(which gfortran) PGPLOT_DIR=${PGPLOT_DIR:-/usr/lib/pgplot5} \
@@ -36,102 +34,93 @@ if [ ! -x "$MPI_C1" ] || [ ! -x "$MPI_C0" ]; then
   fi
   grep -q "building SUITE with MPI" cmake.log && grep -q "building DIFFEV with MPI" cmake.log \
     || fail "cmake did not find MPI; see $M/build/cmake.log"
-  echo "building MPI c1 (fixed) ..."
-  make -j$(nproc) > make_c1.log 2>&1 || fail "make c1, see $M/build/make_c1.log"
-  cp suite/prog/discus_suite $M/mpi_c1k
-  # c0 differs from c1 only in refine/prog/refine_run.f90
-  git -C $M/wt checkout $C0 -- refine/prog/refine_run.f90
-  echo "building MPI c0 (unfixed) ..."
-  make -j$(nproc) > make_c0.log 2>&1 || fail "make c0, see $M/build/make_c0.log"
-  cp suite/prog/discus_suite $M/mpi_c0k
-  git -C $M/wt checkout $C1 -- refine/prog/refine_run.f90
-  git -C $M/wt checkout -q -- kuplot/prog/kuplot_exit.f90   # leave the scratch source clean
+  echo "building MPI binary from $TIP ..."
+  make -j$(nproc) > make_tip.log 2>&1 || fail "make, see $M/build/make_tip.log"
+  cp suite/prog/discus_suite $M/mpi_tip
+  git -C $M/wt apply $KIT/mpi_delta_unfix.patch || fail "kit/mpi_delta_unfix.patch does not apply"
+  echo "building the variant with the old step-size bug ..."
+  make -j$(nproc) > make_unfixed.log 2>&1 || fail "make (unfixed), see $M/build/make_unfixed.log"
+  cp suite/prog/discus_suite $M/mpi_tip_unfixed
+  git -C $M/wt checkout -q -- .   # leave the scratch source clean
 fi
-[ -x "$MPI_C0" ] && [ -x "$MPI_C1" ] && [ -x "$SERIAL_BIN" ] || fail "binaries missing (run handoff 00 first)"
+[ -x "$MPI_TIP" ] && [ -x "$MPI_UNFIXED" ] || fail "MPI binaries missing"
 
-# ---- 2. test case: 2 parameters, 5-point derivatives => 8 derivative runs per cycle ---------
-# The work macro is self-contained (the MPI workers have no data loaded) and has no counters.
+# ---- 2. test cases ---------------------------------------------------------------------------
+# The work macro is self-contained (MPI workers have no data loaded) and has no counters.
 T=$M/test_$(date +%H%M%S)
 mkdir -p $T
-mk() {  # dir
-  mkdir -p $T/$1
-  cp $KIT/refine/gauss.data $T/$1/
-  cat > $T/$1/work_mpi.mac <<'EOF'
+cat > $T/work.mac <<'EOF'
 branch kuplot
-func P_amp*exp(0.0-((r[0]-0.7)/1.3)**2) + P_bg, -5, 5, 0.1
+func P_amp*exp(0.0-((r[0]-P_cen)/P_wid)**2) + P_bg, -5, 5, 0.1
 exit
 finished
 EOF
-  cat > $T/$1/main.mac <<'EOF'
-set prompt,off
-seed 4711, 271828, 314159, 161803, 141421, 173205, 223606, 99991
-refine
-data xy, gauss.data
-newparam P_amp, value:6.0, points:5
-newparam P_bg,  value:0.2, points:5
-set log, on
-set cycle, 3
-run work_mpi.mac
-exit
-exit
-EOF
-}
-for d in serial mpi_c0 mpi_c1; do mk $d; done
-
-NRANK=9   # 1 master + 8 workers; one derivative run per worker (see notes in 09_MPI.md)
-(cd $T/serial && timeout 300 $SERIAL_BIN -macro main.mac < /dev/null > out.txt 2>&1)
-for v in mpi_c0 mpi_c1; do
-  bin=$MPI_C0; [ $v = mpi_c1 ] && bin=$MPI_C1
+CASES="det far p5 p2far"   # easy start; far start with rejected steps; 5-point derivatives; points:2 far start
+for c in $CASES; do
+  for v in serial mpi; do
+    mkdir -p $T/$c/$v
+    cp $KIT/refine/gauss.data $T/work.mac $T/$c/$v/
+    { echo 'set prompt,off'
+      echo 'seed 4711, 271828, 314159, 161803, 141421, 173205, 223606, 99991'
+      echo refine; echo 'data xy, gauss.data'; cat $KIT/refine/p_$c.txt
+      echo 'set log, on'; echo 'set cycle, 25'; echo 'run work.mac'; echo exit; echo exit; } > $T/$c/$v/main.mac
+  done
+  (cd $T/$c/serial && timeout 300 $SERIAL_BIN -macro main.mac < /dev/null > out.txt 2>&1)
   # 'script' gives the program a terminal. Without one it cannot find its parent process
   # (it runs 'ps j'), silently decides MPI is off and runs serially.
-  (cd $T/$v && script -qec "timeout 400 mpirun ${MPIRUN_OPTS:-} --oversubscribe -n $NRANK $bin -macro main.mac < /dev/null" /dev/null > out.txt 2>&1)
+  (cd $T/$c/mpi && script -qec "timeout 400 mpirun ${MPIRUN_OPTS:-} --oversubscribe -n 5 $MPI_TIP -macro main.mac < /dev/null" /dev/null > out.txt 2>&1)
 done
+# the old bug, 5-point case only
+mkdir -p $T/p5/unfixed && cp $T/p5/mpi/main.mac $T/p5/mpi/gauss.data $T/work.mac $T/p5/unfixed/
+(cd $T/p5/unfixed && script -qec "timeout 400 mpirun ${MPIRUN_OPTS:-} --oversubscribe -n 5 $MPI_UNFIXED -macro main.mac < /dev/null" /dev/null > out.txt 2>&1)
 
 # ---- 3. evaluate -----------------------------------------------------------------------------
-OUT=$(python3 - "$T" <<'EOF'
-import re, sys, os, glob
-T = sys.argv[1]
-def parse(v):
-    t = open(f'{T}/{v}/out.txt', errors='replace').read()
+OUT=$(python3 - "$T" "$CASES" <<'EOF'
+import re, sys, glob
+T, cases = sys.argv[1], sys.argv[2].split()
+def parse(path):
+    t = open(path, errors='replace').read()
     t = re.sub(r'\x1b\[[0-9;]*m', '', t)
-    pars = {m.group(1): float(m.group(2)) for m in re.finditer(r'^\s+(P_\w+)\s+:\s+(\S+)\s+\+-', t, re.M)}
-    cyc = [l for l in t.splitlines() if re.match(r'^\s*\d+\s+\S+\s+\S+\s+\d+\s+\S+\s+\S+\s+\S+\s+\S+\s*$', l)]
-    errs = sorted({l.strip() for l in t.splitlines() if '***' in l and 'Version' not in l and '*****' not in l})
+    pars = {m.group(1): (float(m.group(2)), float(m.group(3)))
+            for m in re.finditer(r'^\s+(P_\w+)\s+:\s+(\S+)\s+\+-\s+(\S+)', t, re.M)}
+    cyc = [l.split() for l in t.splitlines()
+           if re.match(r'^\s*\d+\s+\S+\s+\S+\s+\d+\s+\S+\s+\S+\s+\S+\s+\S+\s*$', l)]
+    errs = sorted({l.strip() for l in t.splitlines() if re.search(r'\*\*\*[A-Z/]+\*\*\* ', l)
+                   and 'Version' not in l and '*****' not in l})
     return pars, cyc, errs
-res = {v: parse(v) for v in ('serial', 'mpi_c0', 'mpi_c1')}
-def cycle0(c):   # chi^2/(N-P) of the first cycle
-    return float(c[0].split()[1]) if c else None
-for v, (p, c, e) in res.items():
-    print(f'{v:8s} cycles={len(c):2d} chi2/(N-P) of cycle 0 = {cycle0(c)}   final pars={ {k: round(x, 5) for k, x in p.items()} }')
-    for x in e[:3]:
-        print('         error:', x)
-# MPI really on? the workers write LOGFILE.nnnn into DISCUS_SUITE_DERIVATIVES (kept by 'set log, on')
-for v in ('mpi_c0', 'mpi_c1'):
-    n = len(glob.glob(f'{T}/{v}/DISCUS_SUITE_DERIVATIVES/LOGFILE.*'))
-    print(f'{v:8s} worker log files: {n}')
-s0, a, b = cycle0(res['serial'][1]), cycle0(res['mpi_c1'][1]), cycle0(res['mpi_c0'][1])
-logs1 = len(glob.glob(f'{T}/mpi_c1/DISCUS_SUITE_DERIVATIVES/LOGFILE.*'))
-if s0 is None:
-    print('RESULT: FAIL (serial reference fit did not run)'); sys.exit(1)
-if logs1 == 0:
-    print('RESULT: FAIL (MPI was not active: no worker logs; the run was serial)'); sys.exit(1)
-if a is None:
-    print('RESULT: INCONCLUSIVE (the fixed MPI fit has no cycle 0; see the errors above)'); sys.exit(2)
-if abs(a - s0) > 1e-3 * abs(s0):
-    print('RESULT: FAIL (cycle 0 of the fixed MPI fit differs from the serial fit: %s against %s)' % (a, s0)); sys.exit(1)
-if b is not None and abs(b - s0) <= 1e-2 * abs(s0):
-    print('RESULT: INCONCLUSIVE (fixed MPI equals serial, but the unfixed build also does: the case cannot detect the bug)'); sys.exit(2)
-print('PASS  cycle 0: serial %s, MPI with the fix %s, MPI without the fix %s' % (s0, a, b))
-print('NOTE  later cycles can show "Error opening file" (a worker writing its result file a second time): known, not checked here')
-print('RESULT: PASS')
+ok = True
+for c in cases:
+    s, m = parse(f'{T}/{c}/serial/out.txt'), parse(f'{T}/{c}/mpi/out.txt')
+    logs = len(glob.glob(f'{T}/{c}/mpi/DISCUS_SUITE_DERIVATIVES/LOGFILE.*'))
+    same_pars = bool(s[0]) and set(s[0]) == set(m[0]) and all(
+        abs(s[0][k][0] - m[0][k][0]) <= 1e-4 * max(1.0, abs(s[0][k][0])) for k in s[0])
+    same_cyc = len(s[1]) == len(m[1]) and len(s[1]) > 0
+    good = same_pars and same_cyc and not m[2] and logs > 0
+    ok &= good
+    print(f'{"PASS" if good else "FAIL"}  {c:6s} serial: {len(s[1])} cycles, MPI: {len(m[1])} cycles, parameters {"equal" if same_pars else "DIFFER"}, '
+          f'MPI errors {len(m[2])}, worker logs {logs}')
+    if not good:
+        for e in m[2][:3]:
+            print('        MPI error:', e)
+        if logs == 0:
+            print('        no worker logs: MPI was not active, the run was serial')
+# does the case detect the old bug?
+s, u = parse(f'{T}/p5/serial/out.txt'), parse(f'{T}/p5/unfixed/out.txt')
+c0s = float(s[1][0][1]) if s[1] else None
+c0u = float(u[1][0][1]) if u[1] else None
+detect = c0s is not None and c0u is not None and abs(c0u - c0s) > 0.01 * abs(c0s)
+print(f'{"PASS" if detect else "INFO"}  p5     with the old step-size bug, chi2/(N-P) in cycle 0 is {c0u} (serial {c0s}): '
+      f'{"the old bug is detected" if detect else "the old bug is NOT detected by this case"}')
+print('RESULT: PASS' if ok and detect else ('RESULT: FAIL' if not ok else 'RESULT: INCONCLUSIVE (the case does not detect the old bug)'))
+sys.exit(0 if ok and detect else (1 if not ok else 2))
 EOF
 )
 rc=$?
 echo "$OUT" | grep -v '^RESULT:'
-if [ $rc -ne 0 ]; then
-  for v in serial mpi_c0 mpi_c1; do
-    echo "=== end of output of $v"
-    sed 's/\x1b\[[0-9;]*m//g' $T/$v/out.txt | grep -v '^\s*$' | tail -n 20
+if [ $rc -eq 1 ]; then
+  for c in $CASES; do
+    echo "=== end of output of $c / mpi"
+    sed 's/\x1b\[[0-9;]*m//g' $T/$c/mpi/out.txt | grep -v '^\s*$' | tail -n 12
   done
 fi
 echo "(raw outputs: $T)"

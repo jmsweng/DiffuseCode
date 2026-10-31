@@ -1,16 +1,17 @@
-## REFINE / RMC / KUPLOT: five bug fixes and three speed-ups for structure refinement
+## REFINE / RMC / KUPLOT / HDF5: six bug fixes and three speed-ups for structure refinement
 
-Eight small, independent commits on top of `master` (6fd5f33). Each commit message holds the details and its own test numbers; this page summarises them. The fixes come first, so any prefix of the series can be merged. Commits 5 → 6 → 7 build on each other.
+Nine small, independent commits on top of `master` (6fd5f33). Each commit message holds the details and its own test numbers; this page summarises them. The fixes come first, so any prefix of the series can be merged. Commits 5 → 6 → 7 build on each other.
 
 ### Bug fixes
 
 | # | Commit | Problem | Effect of the fix |
 |---|---|---|---|
-| 1 | `REFINE: fix MPI derivative step sizes being overwritten` | In `refine_calc_deriv_mpi` three assignments wrote `delta = ...` (the whole array) instead of `delta(k) = ...`. The 5-point derivative divides by `delta(k)` after all children return and therefore used the last parameter's step. 3-point derivatives were not affected. | 5-point derivatives under MPI use each parameter's own step. First cycle of a 2-parameter `points:5` fit under MPI: chi²/(N-P) 0.50458 (serial 0.50458), 244 without this fix (with commit 8 applied in both builds). |
+| 1 | `REFINE: fix MPI derivative step sizes being overwritten` | In `refine_calc_deriv_mpi` three assignments wrote `delta = ...` (the whole array) instead of `delta(k) = ...`. The 5-point derivative divides by `delta(k)` after all children return and therefore used the last parameter's step. 3-point derivatives were not affected. | 5-point derivatives under MPI use each parameter's own step. `points:5` fit under MPI, cycle 0: chi²/(N-P) 109.18 as in the serial fit, 365.29 without this fix (commits 8 and 9 applied in both builds). |
 | 2 | `Make seed restore reproduce Gaussian random numbers` | `put_seeds` restored the `RANDOM_NUMBER` state but not the cached second value of the Box-Muller generator `GASDEV` (`iset`/`gset`). After a restore the first Gaussian number depended on whatever ran before. REFINE restores the seeds so that the centre and all derivative points see the same random numbers, so any model with Gaussian randomness (thermal displacements, MC, `gran()`) got noisy derivatives. | A fit with `gran(0.02)` noise: 21 cycles and a wrong minimum (chi² 7992) before, 4 cycles and the true parameters (chi² 76) after. Deterministic fits are unchanged. |
 | 3 | `RMC: fix refinement with lots` | `rmc_inlot` tested the Fourier lot type `ilots` instead of `rmc_ilots` (no move was ever made unless `fourier lots` was set), its periodic wrap could never trigger, `rmc_strucf` added every move to lot 1, `rmc_inten` counted lot 1 twice, and `rmc_calc_scat` subtracted the average over `num(1) x num(1)` points instead of `num(1) x num(2)`. | Cu 6x6x6, one hk0 plane, 300 accepted moves: incremental and freshly calculated chi² now agree to 8e-8 (they differed by 0.5 % with `fourier lots`; without `fourier lots` no move was possible). Without lots nothing changes. |
 | 4 | `REFINE: compute the dP/sigma convergence measure from the parameter sigmas` | `refine_mrq` divided the parameter shift by `SQRT(cl(k,k))`, but after `mrqmin` `cl` holds the curvature matrix of the new point, not its inverse. The printed `MAX(dP/sig)` therefore had the wrong units (e.g. 5e-3 where the real shift was 215 sigma), and convergence criterion 1 (`pshift`, default 0.005) could be met while parameters still moved by many sigma. | The column now divides by the parameter sigma. See "Behaviour changes". |
 | 8 | `KUPLOT: save the complete data set when it is returned to the REFINE master` | With MPI each worker returns its last KUPLOT data set as `DISCUS_SUITE_DERIVATIVES/data.nnnn`. `kuplot_exit` called `check_form` with no limits, which for the format H5 leaves the limits at zero; `do_save` then writes only the range 0..0, i.e. the single point at x = 0, for any data set not read from an HDF5 file (a curve from `func`/`load xy`, a NIPL map). The master loaded a 1x1x1 data set, KUPLOT did not register it, and every derivative run was read as the original data: `All derivatives are zero`. | `kuplot_exit` passes the full x (and y) range for such data sets. Before, no MPI refinement of a KUPLOT curve finished. |
+| 9 | `HDF5 write: initialise hdferr before testing it` | The two write routines in `hdf_write.f90` open the HDF5 library only the first time (`hdf5_get_state`) and then test `hdferr`. When the library is already open, `H5open_f` is skipped and `hdferr` is an uninitialised local variable, so the test could report `Error opening file` (`ier_num = -2`) although nothing went wrong. With MPI each worker writes its result file at the end of every derivative run, so from the second cycle on the runs failed. | `hdferr = 0` before the test. Multi-cycle MPI refinements work. |
 
 ### Speed-ups
 
@@ -52,12 +53,11 @@ A set of test fits (a Gaussian peak with 4 parameters, in KUPLOT only, plus an R
 - cloud, Ubuntu, gfortran 13.3
 - the author's laptop, Ubuntu 22.04 under WSL2, gfortran 11.4.0
 
-Both runs: all checks PASS for commits 1–7 (the numbers in the table above come from the first run; the second gave identical run counts). The MPI check (commits 1 and 8) has so far been run in the cloud only.
+Both runs: all checks PASS for commits 1–7 (the numbers in the table above come from the first run; the second gave identical run counts). The MPI check (commits 1, 8 and 9) has so far been run in the cloud only.
 
 ### What is not tested
 
-- **MPI was tested only for the first cycle.** A 2-parameter, `points:5` fit of a KUPLOT curve with 9 MPI ranks (8 derivative runs per cycle; OpenMPI 4.1.6, gfortran 13.3) reproduces the serial chi² in cycle 0 with commits 1 and 8 (cloud only so far), and does not without commit 1. From cycle 1 on, a worker that writes its result file a second time fails with `Error opening file`; the cause is not known and is not addressed here. Parallel REFINE runs with DISCUS models (3D data via `lh5`) were not tested.
-- The MPI path of commits 5, 6 and 7 (`refine_calc_deriv_mpi` handles `points:2`; under MPI the repeated centre run is kept) is compiled and read but not run.
+- **MPI was tested only with a KUPLOT model and with OpenMPI 4.1.6 / gfortran 13.3, in one environment so far.** Four 4-parameter fits (easy start, far start with rejected steps, `points:5`, `points:2` far start) were run serially and with `mpirun -n 5` (4 workers): same number of cycles, same parameters and esd's (the last digit of an esd can differ), no errors. A build with the old step-size bug gives chi²/(N-P) 365 against 109 in cycle 0 of the `points:5` fit. Parallel REFINE with DISCUS models (3D data) was not tested.
 - Only `points:2/3/5` with one data set were tested. Multi-data-set REFINE (`mrqcof` loops over data set 1's size for all sets) was left alone.
 - The RMC fix was tested with box lots and with box lots plus `fourier lots`, on one hk0 plane; ellipsoidal lots were not tested.
 
