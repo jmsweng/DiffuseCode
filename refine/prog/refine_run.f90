@@ -9,6 +9,8 @@ REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_calc     ! Calculate
 REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_temp     ! Calculated (ix, iy) for derivs
 REAL(kind=PREC_DP), DIMENSION(:,:,:, :), ALLOCATABLE :: refine_derivs   ! Derivativs (ix, iy, parameter)
 LOGICAL :: refine_rerun_centre = .TRUE.   ! Repeat the centre run after the derivatives
+LOGICAL :: refine_centre_valid = .FALSE.   ! refine_calc holds the macro result for refine_centre_p
+REAL(kind=PREC_DP), DIMENSION(:), ALLOCATABLE :: refine_centre_p ! Parameters of the last centre run
 !
 CONTAINS
 !
@@ -156,6 +158,7 @@ IF(opara(OPLOT) /= ' ') THEN
   refine_plot_mac       = opara(OPLOT)
 ENDIF
 refine_rerun_centre = ref_do_plot   ! The plot macro reads the calculated data in KUPLOT
+refine_centre_valid = .FALSE.       ! No centre run for this refinement yet
 !
 ALLOCATE(refine_calc  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
 ALLOCATE(refine_temp  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
@@ -360,6 +363,7 @@ integer :: tid
 integer :: nthreads
 logical :: lserial
 logical :: l_numeric                ! At least one derivative needs macro runs
+logical :: l_reuse                  ! Centre run of this point is still valid
 !character(len=PREC_STRING) :: string
 !integer :: iix
 !
@@ -386,6 +390,20 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
       CALL refine_set_param(NPARA, par_names(k), k, p(k))
    ENDDO 
 !
+!
+!  If derivatives are requested at the point where the macro last ran (a trial
+!  point that was just accepted), refine_calc and the saved random seeds are
+!  still valid and the centre run is not repeated.
+!
+   l_reuse = .false.
+   if(LDERIV .and. refine_centre_valid) then
+      if(allocated(refine_centre_p)) then
+         if(size(refine_centre_p)==NPARA) l_reuse = all(refine_centre_p(1:NPARA)==p(1:NPARA))
+      endif
+   endif
+!
+   cond_reuse: if(.not. l_reuse) then
+   refine_centre_valid = .false.
    CALL refine_save_seeds             ! Save current random number seeds
 !write(*,*) ' INTO      MACRO ', ier_num, ier_typ
    CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
@@ -396,6 +414,11 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
         refine_calc(1:data_dim(1,1),1:data_dim(2,1),1:data_dim(3,1)))
 !
    IF(ier_num /= 0) RETURN
+   if(allocated(refine_centre_p)) deallocate(refine_centre_p)
+   allocate(refine_centre_p(NPARA))
+   refine_centre_p(1:NPARA) = p(1:NPARA)
+   refine_centre_valid = .true.
+   endif cond_reuse
 !
 !  Loop over all parameters to derive derivatives
 !
@@ -2004,6 +2027,8 @@ INTEGER                         :: k     = 0
 REAL(kind=PREC_DP), DIMENSION(MAXP)        :: atry != 0.0
 REAL(kind=PREC_DP), DIMENSION(NPARA)       :: da != 0.0
 REAL(kind=PREC_DP), DIMENSION(NPARA,NPARA) :: cl != 0.0
+REAL(kind=PREC_DP), DIMENSION(NPARA,NPARA) :: alpha_try  ! Unused output of the trial evaluation
+REAL(kind=PREC_DP), DIMENSION(NPARA      ) :: beta_try   ! Unused output of the trial evaluation
 REAL(kind=PREC_DP)                            :: ochisq = 0.0
 real(kind=PREC_DP)                            :: qmin, qmax
 logical           , dimension(npara)       :: lderiv_ok
@@ -2116,10 +2141,23 @@ DO j=1,NPARA
    ENDIF
 ENDDO
 !
+!
+! Evaluate the trial point without derivatives. They are needed only if the
+! step is accepted; a rejected step then costs one macro run instead of 
+! one run per derivative point. The accepted point reuses this run.
+!
 CALL mrqcof(MAXP, data_dim,                                                atry, &
-            NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, covar, da, chisq, LDERIV) !, funcs)
+            NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, alpha_try, beta_try, chisq, NDERIV) !, funcs)
 IF(ier_num/=0) THEN
    RETURN
+ENDIF
+covar(:,:) = cl(:,:)               ! Rejected step: return the current covariance estimate
+IF(chisq < ochisq) THEN            ! Accepted, now get derivatives at the trial point
+   CALL mrqcof(MAXP, data_dim,                                                atry, &
+               NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, covar, da, chisq, LDERIV) !, funcs)
+   IF(ier_num/=0) THEN
+      RETURN
+   ENDIF
 ENDIF
 !
 !do j=1, npara
@@ -2270,6 +2308,7 @@ loopix: do iix=1, ref_data_ptr(1)%data_ptr%dims(1)
 !write(*,'(3f6.1, 2f12.4)') xx,yy,zz, ymod, data_sigma(iix,iiy,iiz)
 !     dy = data_data(iix,iiy,iiz,1) - ymod
       dy = ref_data_ptr(idata)%data_ptr%datamap(iix,iiy,iiz) - ymod
+      IF(LDERIV) THEN                  ! dyda is only defined with derivatives
       DO j=1, NPARA
          wt = dyda(j)*sig2i
          DO k=1, j
@@ -2277,6 +2316,7 @@ loopix: do iix=1, ref_data_ptr(1)%data_ptr%dims(1)
          ENDDO
          beta(j) = beta(j) + dy*wt
       ENDDO
+      ENDIF
       chisq = chisq + dy*dy*sig2i
 !
    ENDDO loopiz
