@@ -93,10 +93,35 @@ Two things to know when running MPI refinements by hand:
 
 ## Behaviour changes to be aware of
 
-- **Item 4** changes the printed `MAX(dP/sig)` column (215, 98, 17, 0.43 sigma in the test fit instead of 5e-3 … 8e-5). The test fits stop on the chi² criterion and are unchanged, but a fit that used to stop on criterion 1 may now run more cycles.
-- **Item 2** changes the results of any refinement or MC calculation that draws Gaussian random numbers after a seed restore. This is the point of the fix, but numbers will differ from earlier runs.
-- **Item 5** keeps the repeated centre run when a per-cycle plot macro is used or when running under MPI.
-- Everything else is bit-identical (cycle tables, parameters, esd's) to the previous commit.
+Which results can change, in short:
+
+| Item | Serial REFINE | MPI REFINE | RMC | Numbers differ from `master`? |
+|---|---|---|---|---|
+| 1 | — | `points:5` | — | yes, where `master` was wrong |
+| 2 | models with Gaussian random numbers | same | — | yes, where `master` was wrong |
+| 3 | — | — | `set lots` | yes, where `master` was wrong |
+| 4 | printed column, stop criterion 1 | same | — | printed values: yes; fit path: only if it stopped on criterion 1 |
+| 5, 6 | number of macro runs | same | — | no |
+| 7 | only if `points:2` is used | same | — | no |
+| 8, 9 | — | every MPI refinement of a KUPLOT curve | — | `master` gave no result |
+
+### Where the numbers change (bug fixes)
+
+- **Item 1 (MPI step sizes).** Only `points:5` under MPI is affected. With `master`, every 5-point derivative was divided by the step of the last parameter, so with parameters of different size the Jacobian, the steps and the esd's were wrong. An MPI fit that converged anyway will take a different path and may end at slightly different parameters and a different number of cycles. Serial fits and `points:3` under MPI are unchanged.
+- **Item 2 (seed restore).** Any refinement, or any macro calculation using the seed restore, that draws Gaussian random numbers changes. This includes `gran()` in the macro, thermal displacements and Monte Carlo steps that call the Gaussian generator. Before, the first Gaussian number after a restore depended on what had run before, so the centre run and the derivative runs saw different noise and the derivatives were noisy. Now they see the same numbers. A fit that used to stop early on a wrong minimum can now run more cycles to a different, better result. Fits with uniform random numbers or none are bit-identical. Fixed seeds still give reproducible results, but not the same numbers as before this fix.
+- **Item 3 (RMC lots).** Only RMC runs with `set lots` are affected; without lots the code path is unchanged. Before, no move was made unless `fourier lots` was also set, so those runs did not refine anything; with `fourier lots` the lot sums were wrong by about 0.5 %. RMC runs with lots now move atoms, accept and reject steps, and reach different chi² values. Results of earlier RMC runs with lots should not be reused.
+- **Items 8 and 9 (MPI results).** Only MPI refinements are affected. Before, a refinement of a KUPLOT curve under MPI stopped with `All derivatives are zero`, and from the second cycle on a worker could fail with `Error opening file`. Now they run. No result that was correct before changes.
+
+### Where the printed output or the stopping point changes
+
+- **Item 4 (`MAX(dP/sig)`).** The column in the cycle table is now the largest parameter shift in units of the parameter sigma (from the covariance matrix), as the name says. Before, it was divided by the square root of the curvature matrix diagonal, which has the wrong units, and the values were far too small (5e-3 where the real shift was 215 sigma; the test fit shows 215, 98, 17, 0.43 instead of 5e-3 … 8e-5). Convergence criterion 1 (`pshift`, default 0.005) uses this number. A fit that stopped on criterion 1 while parameters still moved by many sigma will now keep going, and a script that reads the column must expect larger values. Fits that stop on the chi² criterion stop on the same cycle with the same parameters, esd's and chi². If a parameter has no sigma (`dp(k)` = 0), it is skipped in the maximum; before, a zero curvature diagonal was skipped.
+- **Items 5 and 6 (fewer macro runs).** Results are bit-identical, but the user macro runs less often. This matters only if the macro has side effects: a counter or a global variable that is increased per run, files it writes, a log it appends to, or a plot macro that expects to run at a rejected trial point. After these items:
+  - Each cycle runs the macro once less at the centre point.
+  - A rejected Levenberg–Marquardt step costs one run instead of 2N+1 (3-point) or 4N+1 (5-point), so the number of runs per cycle varies.
+  - The program state after a cycle is the one a repeated centre run would have left. The one exception is a per-cycle plot macro (`run ..., plot:`) and MPI, which keep the repeated centre run, because the plot reads the data in KUPLOT and the MPI master loads the derivative results into KUPLOT.
+  - Derivatives that the user supplies analytically are not affected.
+  - Anything that counted macro runs to find out how many cycles a fit took should count the lines of the cycle table instead.
+- **Item 7 (`points:2`).** Nothing changes unless a parameter is declared with `points:2`. The default stays `points:3`. The error message for an invalid `points:` value now also names the allowed value 2. Use it for smooth parameters; the one-sided difference has an error proportional to the step, not its square, so a parameter with strong curvature or a small step on a noisy model can give worse derivatives than `points:3`.
 
 ## Not included (found during the review)
 
