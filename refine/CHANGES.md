@@ -18,35 +18,23 @@ Items 5 and 6 give bit-identical results. Items 1, 2, 3, 4, 8 and 9 change resul
 
 ## Changes
 
-| # | Change | Files | When active | Effect |
-|---|---|---|---|---|
-| 1 | **MPI derivative step sizes** (bug fix). In `refine_calc_deriv_mpi` three assignments wrote `delta = ...` (the whole array) instead of `delta(k) = ...`. The 5-point derivative divides by `delta(k)` after all children return and so used the last parameter's step. | `refine/prog/refine_run.f90` | `points:5` under MPI. 3-point was not affected | First cycle of a 2-parameter `points:5` fit under MPI: chi²/(N-P) 0.50458, equal to serial; 244 before |
-| 2 | **Seed restore.** `put_seeds` restored the `RANDOM_NUMBER` state but not the cached second value of the Box-Muller generator `GASDEV` (`iset`/`gset`). REFINE restores the seeds so the centre and all derivative points see the same random numbers; with a stale cache the first Gaussian number depended on what ran before, and the derivatives were noisy | `lib_f90/random_state_mod.f90`, `refine/prog/refine_random_mod.f90` | Any model that draws Gaussian random numbers after a seed restore (`gran()`, thermal displacements, MC) | Fit with `gran(0.02)` noise: 21 cycles to a wrong minimum (chi² 7992) before, 4 cycles to the true one (chi² 76) after. Deterministic fits unchanged |
-| 3 | **RMC with lots.** `rmc_inlot` tested the Fourier lot type `ilots` instead of `rmc_ilots`, so no move was made unless `fourier lots` was set; its periodic wrap could never trigger; `rmc_strucf` added every move to lot 1; `rmc_inten` counted lot 1 twice; `rmc_calc_scat` subtracted the average over `num(1)×num(1)` points instead of `num(1)×num(2)` | `discus/prog/rmc_sup_mod.f90` | `set lots` in RMC. Without lots nothing changes | Cu 6×6×6, one hk0 plane, 300 accepted moves: incremental and freshly calculated chi² agree to 8e-8 (they differed by 0.5 % with `fourier lots`) |
-| 4 | **`dP/sigma` measure.** `refine_mrq` divided the parameter shift by `SQRT(cl(k,k))`, but after `mrqmin` `cl` holds the curvature matrix of the new point, not its inverse. The printed `MAX(dP/sig)` had the wrong units, and convergence criterion 1 (`pshift`, default 0.005) could be met while parameters still moved by many sigma | `refine/prog/refine_run.f90` | Always | Test fit, cycle 0: printed 5e-3, actual shift 215 sigma. A fit that used to stop on criterion 1 may now run more cycles (correctly) |
-| 5 | **Skip the repeated centre run.** After the derivatives, `refine_theory` ran the macro a second time at the centre point to leave the program state at the current parameters. Now done only with a per-cycle plot macro (`run ..., plot:`) or under MPI; otherwise the random generator is restored to the state the repeated run would have left. Also fixes a read past the array bound for a single parameter (`gl_is_der(1) .and. gl_is_der(2)`) | `refine/prog/refine_run.f90`, `refine/prog/refine_random_mod.f90` | Always, except with plot macro or MPI | −1 run per cycle, bit-identical |
-| 6 | **Derivatives only for accepted steps.** `mrqmin` computed all derivatives at every trial point and discarded them when chi² did not improve. The trial point is now evaluated with one run; only an accepted step computes the derivatives, reusing the trial run as their centre | `refine/prog/refine_run.f90` | Always | A rejected step costs 1 run instead of 2N+1 (3-point) or 4N+1 (5-point), bit-identical |
-| 7 | **`points:2`** (new, opt-in). `(f(p+h) − f(p))/h` needs one extra run per parameter instead of two. The default stays `points:3`. Help text and the error message for invalid `points:` values are updated; `refine_calc_deriv_mpi` handles it | `refine/prog/refine_run.f90`, `refine_add_param.f90`, `refine_err_appl.f90`, `appl_ref.hlp` | Only with `newparam ..., points:2` | N instead of 2N runs per Jacobian. Suited to smooth parameters such as scale factors (error ∝ h instead of h²) |
-| 8 | **KUPLOT result for the MPI master** (bug fix). Each worker returns its last KUPLOT data set as `DISCUS_SUITE_DERIVATIVES/data.nnnn`. `kuplot_exit` called `check_form` with no limits, which for the format H5 leaves the limits at zero, and `do_save` then wrote only the range 0..0, the single point at x = 0, for any data set not read from an HDF5 file. The master loaded a 1×1×1 data set and read every derivative run as the original data | `kuplot/prog/kuplot_exit.f90` | MPI refinement of a KUPLOT curve or NIPL map | Before, no such MPI refinement finished (`All derivatives are zero`) |
-| 9 | **HDF5 write** (bug fix). `hdferr` was tested uninitialised when the HDF5 library was already open, so a worker's second write failed with a false `Error opening file`. `hdferr = 0` is now set before the tests (two places) | `lib_f90/hdf_write.f90` | Any HDF5 write after the first one | Multi-cycle MPI fits work |
+| # | Commit | Change | Files | When active | Effect |
+|---|---|---|---|---|---|
+| 1 | [`2e95b93`](https://github.com/jmsweng/DiffuseCode/commit/2e95b93200d1ac5e69d3d3381b0b73568995444a) | **MPI derivative step sizes** (bug fix). In `refine_calc_deriv_mpi` three assignments wrote `delta = ...` (the whole array) instead of `delta(k) = ...`. The 5-point derivative divides by `delta(k)` after all children return and so used the last parameter's step. | `refine/prog/refine_run.f90` | `points:5` under MPI. 3-point was not affected | First cycle of a 2-parameter `points:5` fit under MPI: chi²/(N-P) 0.50458, equal to serial; 244 before |
+| 2 | [`df2b814`](https://github.com/jmsweng/DiffuseCode/commit/df2b814a1a2827707554d04863aaa3ae9fea2269) | **Seed restore.** `put_seeds` restored the `RANDOM_NUMBER` state but not the cached second value of the Box-Muller generator `GASDEV` (`iset`/`gset`). REFINE restores the seeds so the centre and all derivative points see the same random numbers; with a stale cache the first Gaussian number depended on what ran before, and the derivatives were noisy | `lib_f90/random_state_mod.f90`, `refine/prog/refine_random_mod.f90` | Any model that draws Gaussian random numbers after a seed restore (`gran()`, thermal displacements, MC) | Fit with `gran(0.02)` noise: 21 cycles to a wrong minimum (chi² 7992) before, 4 cycles to the true one (chi² 76) after. Deterministic fits unchanged |
+| 3 | [`a299cfa`](https://github.com/jmsweng/DiffuseCode/commit/a299cfa8f959847a922973584e85110f891c6107) | **RMC with lots.** `rmc_inlot` tested the Fourier lot type `ilots` instead of `rmc_ilots`, so no move was made unless `fourier lots` was set; its periodic wrap could never trigger; `rmc_strucf` added every move to lot 1; `rmc_inten` counted lot 1 twice; `rmc_calc_scat` subtracted the average over `num(1)×num(1)` points instead of `num(1)×num(2)` | `discus/prog/rmc_sup_mod.f90` | `set lots` in RMC. Without lots nothing changes | Cu 6×6×6, one hk0 plane, 300 accepted moves: incremental and freshly calculated chi² agree to 8e-8 (they differed by 0.5 % with `fourier lots`) |
+| 4 | [`368094c`](https://github.com/jmsweng/DiffuseCode/commit/368094c69bb13408ab19cffe60fd833bf067fec5) | **`dP/sigma` measure.** `refine_mrq` divided the parameter shift by `SQRT(cl(k,k))`, but after `mrqmin` `cl` holds the curvature matrix of the new point, not its inverse. The printed `MAX(dP/sig)` had the wrong units, and convergence criterion 1 (`pshift`, default 0.005) could be met while parameters still moved by many sigma | `refine/prog/refine_run.f90` | Always | Test fit, cycle 0: printed 5e-3, actual shift 215 sigma. A fit that used to stop on criterion 1 may now run more cycles (correctly) |
+| 5 | [`5d65bcb`](https://github.com/jmsweng/DiffuseCode/commit/5d65bcbf9453886feafc13f36d45ac729db8a044) | **Skip the repeated centre run.** After the derivatives, `refine_theory` ran the macro a second time at the centre point to leave the program state at the current parameters. Now done only with a per-cycle plot macro (`run ..., plot:`) or under MPI; otherwise the random generator is restored to the state the repeated run would have left. Also fixes a read past the array bound for a single parameter (`gl_is_der(1) .and. gl_is_der(2)`) | `refine/prog/refine_run.f90`, `refine/prog/refine_random_mod.f90` | Always, except with plot macro or MPI | −1 run per cycle, bit-identical |
+| 6 | [`863bb4f`](https://github.com/jmsweng/DiffuseCode/commit/863bb4f238d17c6db40b1540877adc91e9eed19c) | **Derivatives only for accepted steps.** `mrqmin` computed all derivatives at every trial point and discarded them when chi² did not improve. The trial point is now evaluated with one run; only an accepted step computes the derivatives, reusing the trial run as their centre | `refine/prog/refine_run.f90` | Always | A rejected step costs 1 run instead of 2N+1 (3-point) or 4N+1 (5-point), bit-identical |
+| 7 | [`f40b2b5`](https://github.com/jmsweng/DiffuseCode/commit/f40b2b54cbaa58080d57d921874db1af38e50acf) | **`points:2`** (new, opt-in). `(f(p+h) − f(p))/h` needs one extra run per parameter instead of two. The default stays `points:3`. Help text and the error message for invalid `points:` values are updated; `refine_calc_deriv_mpi` handles it | `refine/prog/refine_run.f90`, `refine_add_param.f90`, `refine_err_appl.f90`, `appl_ref.hlp` | Only with `newparam ..., points:2` | N instead of 2N runs per Jacobian. Suited to smooth parameters such as scale factors (error ∝ h instead of h²) |
+| 8 | [`d1edc81`](https://github.com/jmsweng/DiffuseCode/commit/d1edc81ef788dfd7630f263121ec92ef644bc596) | **KUPLOT result for the MPI master** (bug fix). Each worker returns its last KUPLOT data set as `DISCUS_SUITE_DERIVATIVES/data.nnnn`. `kuplot_exit` called `check_form` with no limits, which for the format H5 leaves the limits at zero, and `do_save` then wrote only the range 0..0, the single point at x = 0, for any data set not read from an HDF5 file. The master loaded a 1×1×1 data set and read every derivative run as the original data | `kuplot/prog/kuplot_exit.f90` | MPI refinement of a KUPLOT curve or NIPL map | Before, no such MPI refinement finished (`All derivatives are zero`) |
+| 9 | [`0d73677`](https://github.com/jmsweng/DiffuseCode/commit/0d7367726ee5b78d346c22497c0b02928d27ca29) | **HDF5 write** (bug fix). `hdferr` was tested uninitialised when the HDF5 library was already open, so a worker's second write failed with a false `Error opening file`. `hdferr = 0` is now set before the tests (two places) | `lib_f90/hdf_write.f90` | Any HDF5 write after the first one | Multi-cycle MPI fits work |
 
 Also changed: the help text for `newparam` (`points:2`).
 
 ### Commits
 
-| Commit | Description |
-|---|---|
-| `2e95b93` | REFINE: fix MPI derivative step sizes being overwritten |
-| `df2b814` | Make seed restore reproduce Gaussian random numbers |
-| `a299cfa` | RMC: fix refinement with lots |
-| `368094c` | REFINE: compute the dP/sigma convergence measure from the parameter sigmas |
-| `5d65bcb` | REFINE: skip the repeated centre run after the derivatives |
-| `863bb4f` | REFINE: compute derivatives only for accepted steps |
-| `f40b2b5` | REFINE: add two-point (one-sided) derivatives, `points:2` |
-| `d1edc81` | KUPLOT: save the complete data set when it is returned to the REFINE master |
-| `0d73677` | HDF5 write: initialise hdferr before testing it |
-
-9 source files changed, +232 / −70 lines. Each commit builds on its own; 5 → 6 → 7 depend on each other. Any prefix of the series can be merged.
+Each fix and each speed-up is a separate commit that contains only that item, so each one can be reviewed, tested or reverted on its own. The commits are in the order of the table (items 1–9); the commit for each item is in the second column. 9 source files changed, +232 / −70 lines. Each commit builds on its own; 5 → 6 → 7 depend on each other. Any prefix of the series can be merged. The later commits on the branch change only documentation.
 
 ## Cost
 
@@ -95,15 +83,15 @@ Two things to know when running MPI refinements by hand:
 
 Which results can change, in short:
 
-| Item | Serial REFINE | MPI REFINE | RMC | Numbers differ from `master`? |
-|---|---|---|---|---|
-| 1 | — | `points:5` | — | yes, where `master` was wrong |
-| 2 | models with Gaussian random numbers | same | — | yes, where `master` was wrong |
-| 3 | — | — | `set lots` | yes, where `master` was wrong |
-| 4 | printed column, stop criterion 1 | same | — | printed values: yes; fit path: only if it stopped on criterion 1 |
-| 5, 6 | number of macro runs | same | — | no |
-| 7 | only if `points:2` is used | same | — | no |
-| 8, 9 | — | every MPI refinement of a KUPLOT curve | — | `master` gave no result |
+| Item | Commit | Serial REFINE | MPI REFINE | RMC | Numbers differ from `master`? |
+|---|---|---|---|---|---|
+| 1 | [`2e95b93`](https://github.com/jmsweng/DiffuseCode/commit/2e95b93200d1ac5e69d3d3381b0b73568995444a) | — | `points:5` | — | yes, where `master` was wrong |
+| 2 | [`df2b814`](https://github.com/jmsweng/DiffuseCode/commit/df2b814a1a2827707554d04863aaa3ae9fea2269) | models with Gaussian random numbers | same | — | yes, where `master` was wrong |
+| 3 | [`a299cfa`](https://github.com/jmsweng/DiffuseCode/commit/a299cfa8f959847a922973584e85110f891c6107) | — | — | `set lots` | yes, where `master` was wrong |
+| 4 | [`368094c`](https://github.com/jmsweng/DiffuseCode/commit/368094c69bb13408ab19cffe60fd833bf067fec5) | printed column, stop criterion 1 | same | — | printed values: yes; fit path: only if it stopped on criterion 1 |
+| 5, 6 | [`5d65bcb`](https://github.com/jmsweng/DiffuseCode/commit/5d65bcbf9453886feafc13f36d45ac729db8a044)<br>[`863bb4f`](https://github.com/jmsweng/DiffuseCode/commit/863bb4f238d17c6db40b1540877adc91e9eed19c) | number of macro runs | same | — | no |
+| 7 | [`f40b2b5`](https://github.com/jmsweng/DiffuseCode/commit/f40b2b54cbaa58080d57d921874db1af38e50acf) | only if `points:2` is used | same | — | no |
+| 8, 9 | [`d1edc81`](https://github.com/jmsweng/DiffuseCode/commit/d1edc81ef788dfd7630f263121ec92ef644bc596)<br>[`0d73677`](https://github.com/jmsweng/DiffuseCode/commit/0d7367726ee5b78d346c22497c0b02928d27ca29) | — | every MPI refinement of a KUPLOT curve | — | `master` gave no result |
 
 ### Where the numbers change (bug fixes)
 
