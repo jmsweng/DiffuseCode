@@ -1,3 +1,18 @@
+> **This fork (`jmsweng/DiffuseCode`)** adds two sets of changes to DiffuseCode 6.23.01,
+> both merged into `master`. The original project is
+> [tproffen/DiffuseCode](https://github.com/tproffen/DiffuseCode).
+>
+> - **[`perf/gemm-fourier`](https://github.com/jmsweng/DiffuseCode/tree/perf/gemm-fourier)**:
+>   faster 3D diffuse scattering and 3D-ΔPDF in DISCUS (up to ~15× on one thread with
+>   `-DDISCUS_BLAS=ON`), a fix for a NUFFT bug that gave wrong intensities on many grids,
+>   and a full-volume regression suite. Details: [discus/benchmarks/CHANGES.md](discus/benchmarks/CHANGES.md).
+> - **[`perf/refine`](https://github.com/jmsweng/DiffuseCode/tree/perf/refine)**: six bug
+>   fixes in structure refinement (REFINE, RMC, KUPLOT, HDF5 output, including MPI) and
+>   fewer macro runs per REFINE fit. Details: [refine/CHANGES.md](refine/CHANGES.md).
+>
+> Both branches are kept as they were, so every change can be seen there commit by commit.
+> **List of all changes: [FORK_CHANGES.md](FORK_CHANGES.md).**
+
 Diffuse program collection
 ================================================================
 
