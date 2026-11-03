@@ -152,6 +152,20 @@ if (DEBUG)
   endif (ISGNU)
 endif (DEBUG)
 
+# Multithreaded FFTW (3D-PDF) if OpenMP is on and FFTW's OpenMP library was found
+if (DISCUS_OMP AND FFTW_DOUBLE_OPENMP_LIB)
+  set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -DDIFFUSE_FFTW_OMP")
+endif ()
+
+# Option to use BLAS (ZGEMM) for the DISCUS Fourier kernel
+option(DISCUS_BLAS "Use BLAS (ZGEMM) for the DISCUS single-crystal Fourier kernel" OFF)
+if (DISCUS_BLAS)
+  find_package(BLAS REQUIRED)
+  set (DIFFUSE_LIBS ${DIFFUSE_LIBS} ${BLAS_LIBRARIES})
+  set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -DDISCUS_BLAS")
+  message (status " DISCUS Fourier kernel uses BLAS: ${BLAS_LIBRARIES}")
+endif (DISCUS_BLAS)
+
 # Go into directories
 
 add_subdirectory(finufft)

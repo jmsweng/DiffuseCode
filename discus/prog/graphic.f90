@@ -2393,38 +2393,99 @@ END SUBROUTINE out_prep_3dpdf_2d
 SUBROUTINE out_prep_3dpdf_3d(dsort)
 !-
 !  Calculate the 3DPDF value via FFT  3D version
+!
+!  The intensity is real, so a real-to-complex transform gives the same
+!  result as the former complex-to-complex one at about half the time and
+!  a quarter of the memory. Only the real part is kept (as before); for
+!  the half of the spectrum that r2c does not store, Re F(-k) = Re F(k).
+!  Index mapping (centre shift, axis order dsort) is identical to
+!  maptofftfd_33D_R_C_DP / fftfdtoline_33D_C_R_DP.
+!  With FFTW's OpenMP library available the transform is multithreaded.
 !+
 !
 USE diffuse_mod
 !
 USE errlist_mod
 USE precision_mod
-USE map_1dtofield
 use lib_f90_fftw3
+!$ use omp_lib
 !
 IMPLICIT NONE
 !
-!LOGICAL              , INTENT(IN) :: laver
 INTEGER, DIMENSION(3), INTENT(IN) :: dsort
 !
-COMPLEX(KIND=KIND(0.0D0)) , DIMENSION(:,:,:), ALLOCATABLE  ::  in_pattern  ! the diffraction pattern
-COMPLEX(KIND=KIND(0.0D0)) , DIMENSION(:,:,:), ALLOCATABLE  :: out_pattern  ! the diffraction pattern
+REAL   (KIND=C_DOUBLE)        , DIMENSION(:,:,:), ALLOCATABLE  ::  in_pattern  ! the diffraction pattern
+COMPLEX(KIND=C_DOUBLE_COMPLEX), DIMENSION(:,:,:), ALLOCATABLE  :: out_pattern  ! half spectrum
 type(c_ptr) :: plan    ! FFWT3 plan
+integer, dimension(3) :: n      ! FFT dimensions, sorted
+integer, dimension(3) :: l      ! Additional shift of 1 for even dimensions
+integer, dimension(3) :: ll     ! Target index
+integer, dimension(3) :: lf     ! Shift for even dimensions of the FFT field
+integer :: i, j, k, nh, isrc, jsrc, ksrc
+real(kind=PREC_DP) :: rnorm
+#ifdef DIFFUSE_FFTW_OMP
+logical, save :: fftw_threads_ready = .false.
+integer(kind=C_INT) :: ires
+integer :: nthreads
+#endif
 !
-ALLOCATE( in_pattern(num(dsort(1)), num(dsort(2)), num(dsort(3))))
-ALLOCATE(out_pattern(num(dsort(1)), num(dsort(2)), num(dsort(3))))
+n  = num(dsort)
+nh = n(1)/2 + 1
+ALLOCATE( in_pattern(n(1), n(2), n(3)))
+ALLOCATE(out_pattern(nh  , n(2), n(3)))
 !
-CALL maptofftfd(num, dsort, dsi, in_pattern)
+!  dsi ==> FFT field, centre moved to (1,1,1)       (as maptofftfd_33D_R_C_DP)
 !
-plan = fftw_plan_dft_3d(num(dsort(3)), num(dsort(2)), num(dsort(1)), in_pattern, out_pattern, FFTW_FORWARD, FFTW_ESTIMATE)
-call   fftw_execute_dft(plan, in_pattern, out_pattern)
+l = mod(num-1, 2)
+do k = 1, num(3)
+   do j = 1, num(2)
+      do i = 1, num(1)
+         ll(1) = mod(i + num(1)/2 - l(1), num(1)) + 1
+         ll(2) = mod(j + num(2)/2 - l(2), num(2)) + 1
+         ll(3) = mod(k + num(3)/2 - l(3), num(3)) + 1
+         in_pattern(ll(dsort(1)), ll(dsort(2)), ll(dsort(3))) = dsi(i,j,k)
+      enddo
+   enddo
+enddo
 !
-out_pattern = out_pattern / sqrt(real(num(1)*num(2)*num(3),kind=PREC_DP))
+#ifdef DIFFUSE_FFTW_OMP
+if(.not. fftw_threads_ready) then
+   ires = fftw_init_threads()
+   fftw_threads_ready = ires /= 0
+endif
+if(fftw_threads_ready) then
+   nthreads = 1
+!$ nthreads = omp_get_max_threads()
+   call fftw_plan_with_nthreads(int(nthreads, kind=C_INT))
+endif
+#endif
+plan = fftw_plan_dft_r2c_3d(n(3), n(2), n(1), in_pattern, out_pattern, FFTW_ESTIMATE)
+call   fftw_execute_dft_r2c(plan, in_pattern, out_pattern)
 call   fftw_destroy_plan(plan)
+DEALLOCATE(in_pattern)
 !
-CALL mapfftfdtoline(num, dsort, rpdf, out_pattern)
+!  FFT field ==> rpdf                               (as fftfdtoline_33D_C_R_DP)
 !
-DEALLOCATE( in_pattern)
+rnorm = 1.0_PREC_DP/sqrt(real(num(1),kind=PREC_DP)*real(num(2),kind=PREC_DP)*real(num(3),kind=PREC_DP))
+lf = mod(n-1, 2)
+do k = 1, n(3)
+   do j = 1, n(2)
+      do i = 1, n(1)
+         if(i <= nh) then
+            isrc = i ; jsrc = j ; ksrc = k
+         else                                    ! Re F(-k) = Re F(k)
+            isrc = n(1) + 2 - i
+            jsrc = mod(n(2) - j + 1, n(2)) + 1
+            ksrc = mod(n(3) - k + 1, n(3)) + 1
+         endif
+         ll(dsort(1)) = n(1) + 1 - (mod(i + n(1)/2 - lf(1) - 1, n(1)) + 1)
+         ll(dsort(2)) = n(2) + 1 - (mod(j + n(2)/2 - lf(2) - 1, n(2)) + 1)
+         ll(dsort(3)) = n(3) + 1 - (mod(k + n(3)/2 - lf(3) - 1, n(3)) + 1)
+         rpdf(ll(1), ll(2), ll(3)) = real(out_pattern(isrc, jsrc, ksrc), kind=PREC_DP)*rnorm
+      enddo
+   enddo
+enddo
+!
 DEALLOCATE(out_pattern)
 !
 END SUBROUTINE out_prep_3dpdf_3d

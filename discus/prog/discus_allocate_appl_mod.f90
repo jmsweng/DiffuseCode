@@ -1474,6 +1474,7 @@ def_value = 0.0D0
 !
 call alloc_arr(four_dbw, 1,n_qxy(1), 1,n_qxy(2), 1,n_qxy(3), 1,n_anis, &
                                  all_status, def_value)
+four_dbw_valid = .false.        ! Contents no longer match the cached Debye-Waller setup
 !
 end subroutine alloc_diffuse_dbw
 !

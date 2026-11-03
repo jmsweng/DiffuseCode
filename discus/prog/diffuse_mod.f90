@@ -148,6 +148,7 @@ REAL(kind=PREC_DP)                      ::  diff_scale   = 1.000D0       ! Inten
 REAL(KIND=PREC_DP), DIMENSION(4,3)      ::  diff_res             ! Resolution sigma and vectors
 REAL(KIND=PREC_DP), DIMENSION(3,3)      ::  diff_tr              ! Resolution transformation matrix
 real(kind=PREC_DP), dimension(:,:,:,:), allocatable :: four_dbw  ! Debye-Waller map
+logical                                             :: four_dbw_valid = .false. ! four_dbw matches its cached setup
 !
 INTEGER                                 ::  four_last = FOUR_NN  ! No Fourier calculated yet
 !
