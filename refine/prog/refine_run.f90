@@ -8,6 +8,9 @@ IMPLICIT NONE
 REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_calc     ! Calculated (ix, iy)
 REAL(kind=PREC_DP), DIMENSION(:,:,:), ALLOCATABLE :: refine_temp     ! Calculated (ix, iy) for derivs
 REAL(kind=PREC_DP), DIMENSION(:,:,:, :), ALLOCATABLE :: refine_derivs   ! Derivativs (ix, iy, parameter)
+LOGICAL :: refine_rerun_centre = .TRUE.   ! Repeat the centre run after the derivatives
+LOGICAL :: refine_centre_valid = .FALSE.   ! refine_calc holds the macro result for refine_centre_p
+REAL(kind=PREC_DP), DIMENSION(:), ALLOCATABLE :: refine_centre_p ! Parameters of the last centre run
 !
 CONTAINS
 !
@@ -154,6 +157,8 @@ IF(opara(OPLOT) /= ' ') THEN
   ref_do_plot = .TRUE.
   refine_plot_mac       = opara(OPLOT)
 ENDIF
+refine_rerun_centre = ref_do_plot   ! The plot macro reads the calculated data in KUPLOT
+refine_centre_valid = .FALSE.       ! No centre run for this refinement yet
 !
 ALLOCATE(refine_calc  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
 ALLOCATE(refine_temp  (ref_data_ptr(1)%data_ptr%dims(1), ref_data_ptr(1)%data_ptr%dims(2), ref_data_ptr(1)%data_ptr%dims(3)))
@@ -357,6 +362,8 @@ INTEGER              :: k ! Dummy loop variable
 integer :: tid
 integer :: nthreads
 logical :: lserial
+logical :: l_numeric                ! At least one derivative needs macro runs
+logical :: l_reuse                  ! Centre run of this point is still valid
 !character(len=PREC_STRING) :: string
 !integer :: iix
 !
@@ -383,15 +390,35 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
       CALL refine_set_param(NPARA, par_names(k), k, p(k))
    ENDDO 
 !
+!
+!  If derivatives are requested at the point where the macro last ran (a trial
+!  point that was just accepted), refine_calc and the saved random seeds are
+!  still valid and the centre run is not repeated.
+!
+   l_reuse = .false.
+   if(LDERIV .and. refine_centre_valid) then
+      if(allocated(refine_centre_p)) then
+         if(size(refine_centre_p)==NPARA) l_reuse = all(refine_centre_p(1:NPARA)==p(1:NPARA))
+      endif
+   endif
+!
+   cond_reuse: if(.not. l_reuse) then
+   refine_centre_valid = .false.
    CALL refine_save_seeds             ! Save current random number seeds
 !write(*,*) ' INTO      MACRO ', ier_num, ier_typ
    CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
                      data_dim, refine_calc, l_data)
+   CALL refine_save_seeds_post        ! Random state as left by the centre run
 !write(*,*) ' BACK FROM MACRO ', ier_num, ier_typ
    CALL gl_set_data(data_dim(1,1), data_dim(2,1), data_dim(3,1), -1,  &
         refine_calc(1:data_dim(1,1),1:data_dim(2,1),1:data_dim(3,1)))
 !
    IF(ier_num /= 0) RETURN
+   if(allocated(refine_centre_p)) deallocate(refine_centre_p)
+   allocate(refine_centre_p(NPARA))
+   refine_centre_p(1:NPARA) = p(1:NPARA)
+   refine_centre_valid = .true.
+   endif cond_reuse
 !
 !  Loop over all parameters to derive derivatives
 !
@@ -437,14 +464,30 @@ initial: IF(idata==1 .and. inx==1 .AND. iny==1 .and. inz==1) THEN   ! Initial po
 !enddo
 !close(55)
 !enddo
-   ENDIF if_deriv
-   if(.not.(gl_is_der(1) .and. gl_is_der(2))) then
+!
+!  The derivative runs leave the macro state (structure, KUPLOT data, random
+!  generator) at a shifted parameter value. refine_calc already holds the
+!  centre values, so the centre run is repeated only if something reads that
+!  state before the next run: the per-cycle plot, or MPI, where the master
+!  loads the derivative results into KUPLOT. Otherwise the random generator is
+!  put where a repeated centre run would have left it.
+!
+      l_numeric = .false.               ! Any derivative calculated by macro runs?
+      do k=1, NPARA
+         if(.not. gl_is_der(k)) l_numeric = .true.
+      enddo
+      if(l_numeric) then
+         if(refine_rerun_centre .or. mpi_active) then
             CALL refine_restore_seeds
 !write(*,*) 'DERIV INTO MACRO ', ier_num, ier_typ
-   CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
-                     data_dim, refine_calc, l_data)
+            CALL refine_macro(MAXP, refine_mac, refine_mac_l, NPARA, kupl_last, par_names, p, &
+                              data_dim, refine_calc, l_data)
 !write(*,*) 'DERIV FROM MACRO ', ier_num, ier_typ
-   endif
+         else
+            CALL refine_restore_seeds_post
+         endif
+      endif
+   ENDIF if_deriv
 !write(*,*) ' GOT FINAL   ', lderiv, minval(refine_calc),maxval(refine_calc), p(1:2)
 !write(*,*) ' DERIVS Fin  ', 1, minval(refine_derivs(:,:,:,1)), maxval(refine_derivs(:,:,:,1))
 !write(*,*) ' DERIVS Fin  ', 2, minval(refine_derivs(:,:,:,2)), maxval(refine_derivs(:,:,:,2))
@@ -579,6 +622,27 @@ ELSE is_deriv
             endif
          ENDIF if_delta
 !
+         IF(p_nderiv(k)==2) THEN               ! Two point (one-sided) derivative
+            IF(prange(k,1)<=prange(k,2)) THEN  ! Keep the shifted point inside the range
+               IF(p(k)+delta <= prange(k,2)) THEN
+                  dvec(1) = p(k) + delta
+                  lvec(1) = .TRUE.
+               ELSEIF(p(k)-delta >= prange(k,1)) THEN
+                  dvec(-1) = p(k) - delta
+                  lvec(-1) = .TRUE.
+               ELSEIF(prange(k,2)-p(k) >= p(k)-prange(k,1)) THEN
+                  dvec(1) = p(k) + 0.5D0*(prange(k,2)-p(k))
+                  lvec(1) = .TRUE.
+               ELSE
+                  dvec(-1) = p(k) - 0.5D0*(p(k)-prange(k,1))
+                  lvec(-1) = .TRUE.
+               ENDIF
+            ELSE
+               dvec(1) = p(k) + delta
+               lvec(1) = .TRUE.
+            ENDIF
+            IF((lvec(1) .and. dvec(1)/=p(k)) .or. (lvec(-1) .and. dvec(-1)/=p(k))) nder = 2  ! Step must not vanish
+         ELSE
 !                                     ! Test at P + DELTA
          IF(prange(k,1)<=prange(k,2)) THEN     ! User provided parameter range
             IF(p(k)==prange(k,1)) THEN         ! At lower limit, use +delta +2delta
@@ -638,6 +702,7 @@ ELSE is_deriv
             ENDIF
 !           p_d     = p(k) + delta
          ENDIF
+         ENDIF                                 ! p_nderiv(k)==2
          DO l = -2, 2
             IF(lvec(l)) THEN
             CALL refine_set_param(NPARA, par_names(k), k, (dvec(l)) )  ! Set modified value
@@ -684,6 +749,20 @@ ELSE is_deriv
                                                     (12.*delta)
                ENDDO
             ENDDO
+            enddo
+         ELSEIF(nder==2) THEN             ! One-sided difference with the centre point
+            IF(lvec(1)) THEN
+               j2 =  1
+            ELSE
+               j2 = -1
+            ENDIF
+            do iiz=1, data_dim(3,1)
+               DO iiy=1, data_dim(2,1)
+                  DO iix=1, data_dim(1,1)
+                     refine_derivs(iix, iiy, iiz, k) = (refine_tttt(iix,iiy,iiz,j2) - refine_calc(iix,iiy,iiz)) / &
+                                                       (dvec(j2) - p(k))
+                  ENDDO
+               ENDDO
             enddo
          ELSEIF(nder==3) THEN             ! Got all three points for derivative
             xmat(:,1) =  1.0
@@ -1127,9 +1206,9 @@ loop_npara_init: do k=1, NPARA
          cond_if_delta: IF(p(k)/=0.0) THEN
 !           delta(k) = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
             if(p_shift(k)<0.0D0) then     ! An additive variation is requested
-               delta = ABS(     p_shift(k))  ! An additive shift is requested
+               delta(k) = ABS(     p_shift(k))  ! An additive shift is requested
             else
-               delta = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
+               delta(k) = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
             endif
          ELSE cond_if_delta
             do i=1, REF_MAXPARAM_SPC      ! Check for special names
@@ -1140,13 +1219,34 @@ loop_npara_init: do k=1, NPARA
                endif
             enddo
             if(p_shift(k)<0.0D0) then     ! An additive variation is requested
-               delta = ABS(     p_shift(k))  ! An additive shift is requested
+               delta(k) = ABS(     p_shift(k))  ! An additive shift is requested
             else
 !              delta = ABS(p(k)*p_shift(k))  ! A multiplicative variation of the parameter seems best
                delta(k) = 1.0D-4                ! Default delta for unknown variables
             endif
          ENDIF cond_if_delta
 !
+         IF(p_nderiv(k)==2) THEN               ! Two point (one-sided) derivative
+            IF(prange(k,1)<=prange(k,2)) THEN  ! Keep the shifted point inside the range
+               IF(p(k)+delta(k) <= prange(k,2)) THEN
+                  dvec(1,k) = p(k) + delta(k)
+                  lvec(1,k) = .TRUE.
+               ELSEIF(p(k)-delta(k) >= prange(k,1)) THEN
+                  dvec(-1,k) = p(k) - delta(k)
+                  lvec(-1,k) = .TRUE.
+               ELSEIF(prange(k,2)-p(k) >= p(k)-prange(k,1)) THEN
+                  dvec(1,k) = p(k) + 0.5D0*(prange(k,2)-p(k))
+                  lvec(1,k) = .TRUE.
+               ELSE
+                  dvec(-1,k) = p(k) - 0.5D0*(p(k)-prange(k,1))
+                  lvec(-1,k) = .TRUE.
+               ENDIF
+            ELSE
+               dvec(1,k) = p(k) + delta(k)
+               lvec(1,k) = .TRUE.
+            ENDIF
+            IF((lvec(1,k) .and. dvec(1,k)/=p(k)) .or. (lvec(-1,k) .and. dvec(-1,k)/=p(k))) nder(k) = 2  ! Step must not vanish
+         ELSE
 !                                     ! Test at P + DELTA
       IF(prange(k,1)<=prange(k,2)) THEN     ! User provided parameter range
          IF(p(k)==prange(k,1)) THEN         ! At lower limit, use +delta +2delta
@@ -1206,6 +1306,7 @@ loop_npara_init: do k=1, NPARA
          ENDIF
 !           p_d     = p(k) + delta
       ENDIF
+         ENDIF                                 ! p_nderiv(k)==2
 !
 !     Populate trial values for DIFFEV
 !
@@ -1299,6 +1400,20 @@ loop_npara_eval: do k=1, NPARA
                                                   -8.0*refine_tttt(iix,iiy,iiz,-1)   &
                                                   +1.0*refine_tttt(iix,iiy,iiz,-2))/ &
                                                  (12.*delta(k))
+            ENDDO
+         ENDDO
+      enddo
+   ELSEIF(nder(k)==2) THEN             ! One-sided difference with the centre point
+      IF(lvec(1,k)) THEN
+         j2 =  1
+      ELSE
+         j2 = -1
+      ENDIF
+      do iiz=1, data_dim(3,1)
+         DO iiy=1, data_dim(2,1)
+            DO iix=1, data_dim(1,1)
+               refine_derivs(iix, iiy, iiz, k) = (refine_tttt(iix,iiy,iiz,j2) - refine_calc(iix,iiy,iiz)) / &
+                                                 (dvec(j2,k) - p(k))
             ENDDO
          ENDDO
       enddo
@@ -1834,11 +1949,12 @@ cycles:DO
          EXIT cycles
       endif
       last_p(last_i,k) = p(k)
-      IF(cl(k,k)/= 0.0) THEN
-!        last_shift(last_i) = MAX(last_shift(last_i), ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k)))) !/SQRT(cl(k,k))))
-         IF(ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k))) > last_shift(last_i)) THEN
+!     Shift relative to the parameter sigma dp(k) from the covariance matrix.
+!     (cl holds the curvature matrix alpha after mrqmin, not the covariance)
+      IF(dp(k) > 0.0) THEN
+         IF(ABS((p(k)-last_p(prev_i,k))/dp(k)) > last_shift(last_i)) THEN
             last_ind = k
-            last_shift(last_i) = ABS((p(k)-last_p(prev_i,k))/SQRT(cl(k,k)))
+            last_shift(last_i) = ABS((p(k)-last_p(prev_i,k))/dp(k))
          ENDIF
       ENDIF
    ENDDO
@@ -1983,6 +2099,8 @@ INTEGER                         :: k     = 0
 REAL(kind=PREC_DP), DIMENSION(MAXP)        :: atry != 0.0
 REAL(kind=PREC_DP), DIMENSION(NPARA)       :: da != 0.0
 REAL(kind=PREC_DP), DIMENSION(NPARA,NPARA) :: cl != 0.0
+REAL(kind=PREC_DP), DIMENSION(NPARA,NPARA) :: alpha_try  ! Unused output of the trial evaluation
+REAL(kind=PREC_DP), DIMENSION(NPARA      ) :: beta_try   ! Unused output of the trial evaluation
 REAL(kind=PREC_DP)                            :: ochisq = 0.0
 real(kind=PREC_DP)                            :: qmin, qmax
 logical           , dimension(npara)       :: lderiv_ok
@@ -2095,10 +2213,23 @@ DO j=1,NPARA
    ENDIF
 ENDDO
 !
+!
+! Evaluate the trial point without derivatives. They are needed only if the
+! step is accepted; a rejected step then costs one macro run instead of 
+! one run per derivative point. The accepted point reuses this run.
+!
 CALL mrqcof(MAXP, data_dim,                                                atry, &
-            NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, covar, da, chisq, LDERIV) !, funcs)
+            NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, alpha_try, beta_try, chisq, NDERIV) !, funcs)
 IF(ier_num/=0) THEN
    RETURN
+ENDIF
+covar(:,:) = cl(:,:)               ! Rejected step: return the current covariance estimate
+IF(chisq < ochisq) THEN            ! Accepted, now get derivatives at the trial point
+   CALL mrqcof(MAXP, data_dim,                                                atry, &
+               NPARA, par_names, prange, p_shift, p_nderiv, kupl_last, covar, da, chisq, LDERIV) !, funcs)
+   IF(ier_num/=0) THEN
+      RETURN
+   ENDIF
 ENDIF
 !
 !do j=1, npara
@@ -2249,6 +2380,7 @@ loopix: do iix=1, ref_data_ptr(1)%data_ptr%dims(1)
 !write(*,'(3f6.1, 2f12.4)') xx,yy,zz, ymod, data_sigma(iix,iiy,iiz)
 !     dy = data_data(iix,iiy,iiz,1) - ymod
       dy = ref_data_ptr(idata)%data_ptr%datamap(iix,iiy,iiz) - ymod
+      IF(LDERIV) THEN                  ! dyda is only defined with derivatives
       DO j=1, NPARA
          wt = dyda(j)*sig2i
          DO k=1, j
@@ -2256,6 +2388,7 @@ loopix: do iix=1, ref_data_ptr(1)%data_ptr%dims(1)
          ENDDO
          beta(j) = beta(j) + dy*wt
       ENDDO
+      ENDIF
       chisq = chisq + dy*dy*sig2i
 !
    ENDDO loopiz

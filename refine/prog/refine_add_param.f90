@@ -150,7 +150,8 @@ ENDIF
 ! Check number of derivative points "points:"
 !
 IF(lpresent(ONDERIV)) THEN                            ! User provided "points:"
-   IF(.NOT. (NINT(owerte(ONDERIV))==3 .OR.         &
+   IF(.NOT. (NINT(owerte(ONDERIV))==2 .OR.         &
+             NINT(owerte(ONDERIV))==3 .OR.         &
              NINT(owerte(ONDERIV))==5     ) ) THEN
       ier_num = -8
       ier_typ = ER_APPL

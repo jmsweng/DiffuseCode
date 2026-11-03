@@ -27,7 +27,7 @@ CHARACTER(LEN=45) ERROR(IU:IO)
      &  'Parameter(s) outside range/constrain        ',            & ! -11 ! refine
      &  'FWHM parameter give negative FWHM           ',            & ! -10 ! refine
      &  'Calculation of derivatives failed           ',            & ! -9  ! refine
-     &  'points is limited to 3 or 5                 ',            & ! -8  ! refine
+     &  'points is limited to 2, 3 or 5              ',            & ! -8  ! refine
      &  'Sigma in data set are zero                  ',            & ! -7  ! refine
      &  'An error occurred in the user macro         ',            & ! -6  ! refine
      &  'Data set must be loaded prior to sigma      ',            & ! -5  ! refine

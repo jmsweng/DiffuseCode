@@ -2297,7 +2297,7 @@ loop_plane: DO ip = 1, rmc_nplane                                               
 !           DO i = 1, rmc_num (1, ip) * rmc_num (2, ip)                                         ! Loop over i
 !              rmc_csf (iii + i, nlot) = rmc_csf (iii + i, nlot) - acsf (i)                     ! Clarify who are these "rmc" arrays ...
 !           ENDDO                                                                               ! End loop over i
-            do j=1, rmc_num(1, ip)
+            do j=1, rmc_num(2, ip)
                do i=1, rmc_num(1, ip)
                   rmc_csf(i,j,ip,k,nlot) = rmc_csf (i,j,ip,k,nlot) - acsf(i,j, 1)
                enddo
@@ -2368,7 +2368,7 @@ IF (lnew) then
 !------ - If there is more than 1 lot, add the rest ..                  
 !                                                                       
    IF (rmc_nlots.gt.1) then 
-      do il=1, rmc_nlots
+      do il=2, rmc_nlots
          do jq = 1, rmc_num(2, ip)
             do iq = 1, rmc_num(1, ip)
                dsi(iq,jq,ip) = dsi(iq,jq,ip) + DBLE (rmc_csf_new(iq,jq, ip,is,il) * conjg(rmc_csf_new(iq,jq, ip,is,il)))
@@ -2394,7 +2394,7 @@ ELSE
       enddo
    enddo
    IF (rmc_nlots.gt.1) then 
-      do il=1, rmc_nlots
+      do il=2, rmc_nlots
          do jq = 1, rmc_num(2, ip)
             do iq = 1, rmc_num(1, ip)
                dsi(iq,jq,ip) = dsi(iq,jq,ip) + DBLE (rmc_csf(iq,jq, ip, is,il) * conjg(rmc_csf(iq,jq, ip, is,il)))
@@ -2921,7 +2921,7 @@ integer, dimension(3), intent(in) :: fnum ! Number increments (reduced by Friede
       IF (lplus) then 
          do jq = 1,rmc_num (2, ip)
          do iq = 1,rmc_num (1, ip)
-         rmc_csf_new(iq,jq,ip, is,1) = rmc_csf_new(iq,jq,ip, is,1) + tcsf(iq,jq, 1)
+         rmc_csf_new(iq,jq,ip, is,il) = rmc_csf_new(iq,jq,ip, is,il) + tcsf(iq,jq, 1)
          enddo
          enddo
 !        DO i = 1, rmc_num (1, ip) * rmc_num (2, ip) 
@@ -2931,7 +2931,7 @@ integer, dimension(3), intent(in) :: fnum ! Number increments (reduced by Friede
       ELSE 
          do jq = 1,rmc_num (2, ip)
          do iq = 1,rmc_num (1, ip)
-         rmc_csf_new(iq,jq,ip, is,1) = rmc_csf_new(iq,jq,ip, is,1) - tcsf(iq,jq, 1)
+         rmc_csf_new(iq,jq,ip, is,il) = rmc_csf_new(iq,jq,ip, is,il) - tcsf(iq,jq, 1)
          enddo
          enddo
 !        DO i = 1, rmc_num (1, ip) * rmc_num (2, ip) 
@@ -2962,8 +2962,8 @@ use precision_mod
 !                                                                       
       REAL(kind=PREC_DP) :: xtest (3), x0 
       INTEGER cr_end 
-      INTEGER iz (3), izmin, izmax 
-      INTEGER is, i 
+      INTEGER iz (3) 
+      INTEGER is, i, id 
 !     
       rmc_inlot = .false.
       cr_end = cr_ncatoms * cr_icc (1) * cr_icc (2) * cr_icc (3) + 1
@@ -2978,67 +2978,35 @@ use precision_mod
 !                                                                       
 !------ Box shaped lot                                                  
 !                                                                       
-      ELSEIF (ilots.eq.LOT_BOX) then 
+      ELSEIF (rmc_ilots.eq.LOT_BOX .or. rmc_ilots.eq.LOT_ELI) then 
+!                                                                       
+!------ Box or ellipsoid shaped lot. Uses the same cell assignment and  
+!       periodic wrap as four_getatm, which built the initial amplitudes
+!                                                                       
          IF (ia.lt.cr_end) then 
             CALL indextocell (ia, iz, is) 
          ELSE 
             DO i = 1, 3 
-            iz (i) = int (cr_pos (i, ia) + cr_dim0 (i, 1) ) - 1 
+               iz (i) = int (cr_pos (i, ia) ) - nint (cr_dim (i, 1) ) + 1 
             ENDDO 
          ENDIF 
 !                                                                       
          rmc_inlot = .true. 
-!                                                                       
          DO i = 1, 3 
-         izmin = rmc_lots_orig (i, il) 
-         izmax = rmc_lots_orig (i, il) + ls_xyz (i) - 1 
-         off (i) = cr_dim0 (i, 1) + rmc_lots_orig (i, il) - 1 
-         rmc_inlot = rmc_inlot.and. (iz (i) .ge.izmin) .and. (iz (i)    &
-         .le.izmax)                                                     
-!                                                                       
-         IF (.not.rmc_inlot.and. (izmax.gt.cr_icc (i) ) ) then 
-            izmin = 1 
-            izmax = izmax - cr_icc (i) 
-            off (i) = off (i) - REAL(cr_icc (i) ) 
-            rmc_inlot = rmc_inlot.and. (iz (i) .ge.izmin) .and. (iz (i) &
-            .le.izmax)                                                  
-         ENDIF 
+            off (i) = cr_dim0 (i, 1) + rmc_lots_orig (i, il) - 1 
+            id = iz (i) - rmc_lots_orig (i, il)     ! Cell index inside the lot
+            IF (id.lt.0) then                       ! Lot wraps over the upper crystal edge
+               id = id + cr_icc (i) 
+               off (i) = off (i) - REAL(cr_icc (i) ) 
+            ENDIF 
+            IF (id.lt.0 .or. id.ge.ls_xyz (i) ) rmc_inlot = .false. 
+            x0 = REAL(ls_xyz (i) ) / 2.0 
+            xtest (i) = (REAL(id) - x0 + 0.5) **2 / x0**2 
          ENDDO 
 !                                                                       
-!------ Ellipsoid shaped lot                                            
-!                                                                       
-      ELSEIF (rmc_ilots.eq.LOT_ELI) then 
-         IF (ia.lt.cr_end) then 
-            CALL indextocell (ia, iz, is) 
-         ELSE 
-            DO i = 1, 3 
-            iz (i) = int (cr_pos (i, ia) + cr_dim0 (i, 1) ) - 1 
-            ENDDO 
+         IF (rmc_ilots.eq.LOT_ELI) then 
+            rmc_inlot = rmc_inlot.and. ( (xtest (1) + xtest (2) + xtest (3) ) .le.1.0) 
          ENDIF 
-!                                                                       
-         rmc_inlot = .true. 
-!                                                                       
-         DO i = 1, 3 
-         x0 = REAL(ls_xyz (i) ) / 2.0 
-         izmin = rmc_lots_orig (i, il) 
-         izmax = rmc_lots_orig (i, il) + ls_xyz (i) - 1 
-         off (i) = cr_dim0 (i, 1) + rmc_lots_orig (i, il) - 1 
-         xtest (i) = (iz (i) - izmin - x0 + 0.5) **2 / x0**2 
-         rmc_inlot = rmc_inlot.and. (iz (i) .ge.izmin) .and. (iz (i)    &
-         .le.izmax)                                                     
-!                                                                       
-         IF (.not.rmc_inlot.and. (izmax.gt.cr_icc (i) ) ) then 
-            izmin = 1 
-            izmax = izmax - cr_icc (i) 
-            off (i) = off (i) - REAL(cr_icc (i) ) 
-            rmc_inlot = rmc_inlot.and. (iz (i) .ge.izmin) .and. (iz (i) &
-            .le.izmax)                                                  
-         ENDIF 
-         ENDDO 
-!                                                                       
-         rmc_inlot = rmc_inlot.and. ( (xtest (1) + xtest (2) + xtest (3)&
-         ) .le.1.0)                                                     
-!                                                                       
       ENDIF 
       END FUNCTION rmc_inlot                        
 !*****7*****************************************************************

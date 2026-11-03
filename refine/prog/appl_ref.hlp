@@ -180,10 +180,17 @@
    points:<nderiv>
       REFINE estimates the derivative by calculating the cost function
       at either:
+      the 2 points              p; p+h                 or at
       the 3 points        p-h; p; p+h          or at 
       the 5 points  p-2h; p-h; p; h+h; p+2h.
       The five point estimate is more accurate and is recommended 
       for parameters like nanoparticle diameters. 
+      The two point estimate needs one macro run per cycle instead of
+      two (three point) or four (five point), as the value at p is 
+      already known. It is less accurate (the error is proportional to
+      h instead of h^2) and suits parameters with a smooth, nearly 
+      linear effect, like scale factors. Near the upper end of a range
+      the point p-h is used instead.
       Default: points:3
                For FWHM parameters "P_u", "P_v", "P_w" the default is 5
 2  reset
